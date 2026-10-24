@@ -6,18 +6,12 @@ export type Street = 'preflop' | 'flop' | 'turn' | 'river'
 export type Phase = 'idle' | 'betting' | 'handOver'
 export type ActKind = 'fold' | 'check' | 'call' | 'raise' | 'allin'
 
-export interface Persona {
-  /** 0.7 tight .. 1.3 loose */
-  loose: number
-  /** 0.7 passive .. 1.4 aggressive */
-  aggro: number
-}
-
 export interface Player {
+  /** Index within this hand's participant list. */
   id: number
+  uid: string
+  seat: number
   name: string
-  human: boolean
-  persona: Persona
   stack: number
   hole: Card[]
   /** Chips put in on the current street. */
@@ -48,22 +42,23 @@ export interface HandResult {
   refund: { id: number; amount: number } | null
 }
 
-export interface Settings {
-  bots: number
+export interface Blinds {
   smallBlind: number
   bigBlind: number
-  startStack: number
 }
 
-export interface GameState {
-  settings: Settings
+export interface HandState {
+  blinds: Blinds
   players: Player[]
-  phase: Phase
+  phase: 'betting' | 'handOver'
   street: Street
   handId: number
   /** Number of actions applied this hand; used to reject stale actions. */
   seq: number
+  /** Indexes into `players`. */
   button: number
+  sb: number
+  bb: number
   toAct: number
   deck: Card[]
   board: Card[]
@@ -72,67 +67,16 @@ export interface GameState {
   minRaise: number
   result: HandResult | null
   log: string[]
-  /** Hands the human has played / rebuys, for stats. */
-  handsPlayed: number
-  rebuys: number
 }
 
-export type Action =
-  | { type: 'newGame'; settings: Settings; names?: string[] }
-  | { type: 'startHand'; deck: Card[] }
-  | { type: 'rebuy' }
-  | { type: 'act'; handId: number; seq: number; seat: number; kind: ActKind; raiseTo?: number }
-
-export const DEFAULT_SETTINGS: Settings = { bots: 4, smallBlind: 10, bigBlind: 20, startStack: 1000 }
-
-const BOT_NAMES = ['Ada', 'Bruno', 'Chen', 'Dana', 'Eli']
-const PERSONAS: Persona[] = [
-  { loose: 0.8, aggro: 0.8 },
-  { loose: 1.2, aggro: 1.3 },
-  { loose: 1.0, aggro: 1.0 },
-  { loose: 1.3, aggro: 0.8 },
-  { loose: 0.8, aggro: 1.3 },
-]
-
-export function createGame(settings: Settings = DEFAULT_SETTINGS): GameState {
-  const players: Player[] = [
-    { id: 0, name: 'You', human: true, persona: { loose: 1, aggro: 1 } },
-    ...Array.from({ length: settings.bots }, (_, i) => ({
-      id: i + 1,
-      name: BOT_NAMES[i],
-      human: false,
-      persona: PERSONAS[i],
-    })),
-  ].map((p) => ({
-    ...p,
-    stack: settings.startStack,
-    hole: [],
-    bet: 0,
-    total: 0,
-    folded: false,
-    allIn: false,
-    acted: false,
-    actedAtBet: -1,
-    lastAction: '',
-  }))
-  return {
-    settings,
-    players,
-    phase: 'idle',
-    street: 'preflop',
-    handId: 0,
-    seq: 0,
-    button: players.length - 1,
-    toAct: -1,
-    deck: [],
-    board: [],
-    currentBet: 0,
-    minRaise: settings.bigBlind,
-    result: null,
-    log: [],
-    handsPlayed: 0,
-    rebuys: 0,
-  }
+export type GameState = HandState
+export interface DealInput {
+  players: { uid: string; seat: number; name: string; stack: number }[]
+  /** Index into `players` of the dealer button. */
+  button: number
+  blinds: Blinds
+  deck: Card[]
+  handId: number
 }
 
 // ---------- helpers ----------
@@ -184,7 +128,7 @@ export function legalActions(state: GameState, seat: number): Legal {
 }
 
 function pushLog(state: GameState, line: string): string[] {
-  return [...state.log.slice(-60), line]
+  return [...state.log.slice(-14), line]
 }
 
 function put(p: Player, amount: number): Player {
@@ -193,43 +137,21 @@ function put(p: Player, amount: number): Player {
   return { ...p, stack, bet: p.bet + a, total: p.total + a, allIn: stack === 0 }
 }
 
-// ---------- reducer ----------
+// ---------- hand lifecycle ----------
 
-export function reduce(state: GameState, action: Action): GameState {
-  switch (action.type) {
-    case 'newGame':
-      return createGame(action.settings)
-    case 'rebuy': {
-      const me = state.players[0]
-      if (state.phase === 'betting' || me.stack > 0) return state
-      const players = state.players.map((p, i) => (i === 0 ? { ...p, stack: state.settings.startStack } : p))
-      return { ...state, players, rebuys: state.rebuys + 1, log: pushLog(state, 'You rebuy.') }
-    }
-    case 'startHand':
-      return startHand(state, action.deck)
-    case 'act':
-      if (action.handId !== state.handId || action.seq !== state.seq || action.seat !== state.toAct) return state
-      return applyAct(state, action.seat, action.kind, action.raiseTo)
-  }
-}
-
-function startHand(state: GameState, deck: Card[]): GameState {
-  if (state.phase === 'betting' || deck.length !== 52) return state
-  if (state.players[0].stack <= 0) return state // human must rebuy first
-  const log: string[] = state.log.slice(-60)
-  // Bots that busted rejoin with a fresh stack so the table stays full.
-  let players = state.players.map((p) => {
-    if (p.stack > 0) return p
-    log.push(`${p.name} rebuys.`)
-    return { ...p, stack: state.settings.startStack }
-  })
-  players = players.map((p) => ({ ...p, hole: [], bet: 0, total: 0, folded: false, allIn: false, acted: false, actedAtBet: -1, lastAction: '' }))
-
+/** Deal a new hand to 2+ participants. Blinds are posted, the first actor is set. */
+export function dealHand(input: DealInput): HandState {
+  const { blinds, deck, handId } = input
+  if (input.players.length < 2 || deck.length !== 52) throw new Error('need 2+ players and a full deck')
+  let players: Player[] = input.players.map((p, id) => ({
+    id, uid: p.uid, seat: p.seat, name: p.name, stack: p.stack,
+    hole: [], bet: 0, total: 0, folded: false, allIn: false, acted: false, actedAtBet: -1, lastAction: '',
+  }))
   const n = players.length
-  const button = nextSeat(players, state.button, (p) => p.stack > 0)
+  const button = input.button
   const headsUp = n === 2
-  const sb = headsUp ? button : nextSeat(players, button, (p) => p.stack > 0)
-  const bb = nextSeat(players, sb, (p) => p.stack > 0)
+  const sb = headsUp ? button : (button + 1) % n
+  const bb = (sb + 1) % n
 
   const d = deck.slice()
   // Deal one card at a time starting left of the button.
@@ -239,30 +161,38 @@ function startHand(state: GameState, deck: Card[]): GameState {
       players[s] = { ...players[s], hole: [...players[s].hole, d.pop()!] }
     }
   }
-  players[sb] = put(players[sb], state.settings.smallBlind)
-  players[bb] = put(players[bb], state.settings.bigBlind)
-  log.push(`--- Hand ${state.handId + 1} --- ${players[button].name} has the button`)
-  log.push(`${players[sb].name} posts ${players[sb].bet}, ${players[bb].name} posts ${players[bb].bet}`)
-
-  const base: GameState = {
-    ...state,
-    players,
-    phase: 'betting',
-    street: 'preflop',
-    handId: state.handId + 1,
-    seq: 0,
-    button,
-    deck: d,
-    board: [],
-    currentBet: state.settings.bigBlind,
-    minRaise: state.settings.bigBlind,
-    result: null,
-    log,
-    handsPlayed: state.handsPlayed + 1,
-    toAct: -1,
+  players[sb] = put(players[sb], blinds.smallBlind)
+  players[bb] = put(players[bb], blinds.bigBlind)
+  const log = [
+    `--- Hand ${handId} --- ${players[button].name} has the button`,
+    `${players[sb].name} posts ${players[sb].bet}, ${players[bb].name} posts ${players[bb].bet}`,
+  ]
+  const base: HandState = {
+    blinds, players, phase: 'betting', street: 'preflop', handId, seq: 0, button, sb, bb,
+    toAct: -1, deck: d, board: [], currentBet: blinds.bigBlind, minRaise: blinds.bigBlind, result: null, log,
   }
   // First to act: left of the big blind (heads-up this is the button/small blind).
   return advance(base, bb)
+}
+
+/** Apply a player's action. Returns the same object when the action is stale or illegal. */
+export function applyAction(state: HandState, a: { handId: number; seq: number; seat: number; kind: ActKind; raiseTo?: number }): HandState {
+  if (state.phase !== 'betting' || a.handId !== state.handId || a.seq !== state.seq || a.seat !== state.toAct) return state
+  return applyAct(state, a.seat, a.kind, a.raiseTo)
+}
+
+/**
+ * Fold a player out of turn (they left, were kicked or timed out while not acting).
+ * Already all-in players are never folded: their chips are committed.
+ */
+export function foldOut(state: HandState, idx: number): HandState {
+  const p = state.players[idx]
+  if (state.phase !== 'betting' || !p || p.folded || p.allIn) return state
+  if (idx === state.toAct) return applyAct(state, idx, 'fold')
+  const players = state.players.map((x, i) => (i === idx ? { ...x, folded: true, lastAction: 'left' } : x))
+  const next: HandState = { ...state, players, seq: state.seq + 1, log: pushLog(state, `${p.name} folds`) }
+  if (players.filter(live).length === 1 || roundComplete(next)) return advance(next, state.toAct)
+  return next
 }
 
 function applyAct(state: GameState, seat: number, kind: ActKind, raiseTo?: number): GameState {
@@ -321,7 +251,7 @@ function applyAct(state: GameState, seat: number, kind: ActKind, raiseTo?: numbe
     currentBet,
     minRaise,
     seq: state.seq + 1,
-    log: pushLog(state, `${p.name} ${p.human ? text.replace(/^(\w+)s\b/, '$1') : text}`),
+    log: pushLog(state, `${p.name} ${text}`),
   }
   return advance(next, seat)
 }
@@ -363,7 +293,7 @@ function dealStreet(state: GameState): GameState {
     board,
     street,
     currentBet: 0,
-    minRaise: state.settings.bigBlind,
+    minRaise: state.blinds.bigBlind,
     log: pushLog(state, `${street.toUpperCase()}: ${board.map(cardText).join(' ')}`),
   }
 }
@@ -419,7 +349,7 @@ function finishHand(state: GameState, showdown: boolean): GameState {
     phase: 'handOver',
     toAct: -1,
     seq: state.seq + 1,
-    log: log.slice(-60),
+    log: log.slice(-15),
     result: { showdown, pots: awards, payouts, hands, refund },
   }
 }

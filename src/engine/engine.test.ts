@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { newDeck, parseCards, shuffle, type Card, type Rng } from './cards.ts'
 import { compareScores, evaluate, Category } from './evaluate.ts'
 import { buildPots, splitPot } from './pots.ts'
-import { createGame, DEFAULT_SETTINGS, legalActions, reduce, totalChips, type ActKind, type GameState } from './game.ts'
-import { decide } from './bots.ts'
+import { applyAction, dealHand, foldOut, legalActions, totalChips, type ActKind, type HandState } from './game.ts'
 
 function seeded(seed: number): Rng {
   let a = seed >>> 0
@@ -119,24 +118,33 @@ function rigged(top: string): Card[] {
   const rest = newDeck().filter((c) => !wanted.some((w) => w.rank === c.rank && w.suit === c.suit))
   return [...rest, ...wanted.reverse()]
 }
-const act = (s: GameState, kind: ActKind, raiseTo?: number) =>
-  reduce(s, { type: 'act', handId: s.handId, seq: s.seq, seat: s.toAct, kind, raiseTo })
+const blinds = { smallBlind: 10, bigBlind: 20 }
+function deal(stacks: number[], button = 0, deck: Card[] = newDeck()): HandState {
+  return dealHand({
+    players: stacks.map((stack, i) => ({ uid: `u${i}`, seat: i, name: `P${i}`, stack })),
+    button, blinds, deck, handId: 1,
+  })
+}
+const act = (s: HandState, kind: ActKind, raiseTo?: number) =>
+  applyAction(s, { handId: s.handId, seq: s.seq, seat: s.toAct, kind, raiseTo })
 
 describe('game', () => {
   it('heads-up: button is small blind and acts first preflop, big blind first after', () => {
-    let s = createGame({ ...DEFAULT_SETTINGS, bots: 1 })
-    s = reduce(s, { type: 'startHand', deck: newDeck() })
-    expect(s.players[s.button].bet).toBe(10)
-    expect(s.toAct).toBe(s.button)
+    let s = deal([1000, 1000], 0)
+    expect(s.players[0].bet).toBe(10)
+    expect(s.toAct).toBe(0)
     s = act(s, 'call')
     expect(s.street).toBe('preflop') // big blind still has the option
     s = act(s, 'check')
     expect(s.street).toBe('flop')
-    expect(s.toAct).not.toBe(s.button)
+    expect(s.toAct).toBe(1)
+  })
+  it('three-handed blind and action order', () => {
+    const s = deal([1000, 1000, 1000], 0)
+    expect([s.sb, s.bb, s.toAct]).toEqual([1, 2, 0])
   })
   it('folding to the big blind ends the hand without showdown', () => {
-    let s = createGame({ ...DEFAULT_SETTINGS, bots: 2 })
-    s = reduce(s, { type: 'startHand', deck: newDeck() })
+    let s = deal([1000, 1000, 1000])
     const before = totalChips(s)
     s = act(s, 'fold'); s = act(s, 'fold')
     expect(s.phase).toBe('handOver')
@@ -144,45 +152,36 @@ describe('game', () => {
     expect(totalChips(s)).toBe(before)
   })
   it('ignores stale or wrong-seat actions', () => {
-    let s = createGame()
-    s = reduce(s, { type: 'startHand', deck: newDeck() })
-    expect(reduce(s, { type: 'act', handId: s.handId, seq: s.seq + 1, seat: s.toAct, kind: 'fold' })).toBe(s)
-    expect(reduce(s, { type: 'act', handId: s.handId, seq: s.seq, seat: (s.toAct + 1) % 5, kind: 'fold' })).toBe(s)
+    const s = deal([1000, 1000, 1000])
+    expect(applyAction(s, { handId: s.handId, seq: s.seq + 1, seat: s.toAct, kind: 'fold' })).toBe(s)
+    expect(applyAction(s, { handId: s.handId, seq: s.seq, seat: (s.toAct + 1) % 3, kind: 'fold' })).toBe(s)
+    expect(applyAction(s, { handId: 99, seq: s.seq, seat: s.toAct, kind: 'fold' })).toBe(s)
   })
   it('a short all-in does not reopen raising for a player who already acted', () => {
-    let s = createGame({ ...DEFAULT_SETTINGS, bots: 2 })
-    s.players[1].stack = 70 // small blind: 10 posted, shoves to 70
-    s = reduce(s, { type: 'startHand', deck: newDeck() })
-    expect(s.toAct).toBe(0)
+    let s = deal([1000, 80, 1000]) // seat 1 is small blind: 10 posted, shoves to 80
     s = act(s, 'raise', 60)
     expect(s.minRaise).toBe(40)
-    expect(s.toAct).toBe(1)
-    s = act(s, 'allin') // 70: only 10 over the bet, a short raise
-    expect(s.currentBet).toBe(70)
+    s = act(s, 'allin') // 80: only 20 over the bet, a short raise
+    expect(s.currentBet).toBe(80)
     expect(s.minRaise).toBe(40)
-    s = act(s, 'call') // big blind calls 70
+    s = act(s, 'call') // big blind calls 80
     expect(s.toAct).toBe(0)
     const l = legalActions(s, 0)
     expect(l.canRaise).toBe(false)
-    expect(l.callAmount).toBe(10)
-    expect(act(s, 'raise', 200)).toBe(s)
-    // but the big blind, who has not yet acted since the raise, could have raised
+    expect(l.callAmount).toBe(20)
+    expect(act(s, 'raise', 300)).toBe(s)
   })
-  it('a full all-in raise reopens action', () => {
-    let s = createGame({ ...DEFAULT_SETTINGS, bots: 2 })
-    s.players[1].stack = 160 // shoves to 160: a 100 raise over 60
-    s = reduce(s, { type: 'startHand', deck: newDeck() })
+  it('a full all-in raise reopens action for others', () => {
+    let s = deal([1000, 170, 1000])
     s = act(s, 'raise', 60)
-    s = act(s, 'allin')
-    expect(s.minRaise).toBe(100)
-    s = act(s, 'fold') // big blind
-    expect(legalActions(s, 0).canRaise).toBe(false) // only one other player, all-in
-    expect(legalActions(s, 0).callAmount).toBe(100)
+    s = act(s, 'allin') // 170, a 110 raise
+    expect(s.minRaise).toBe(110)
+    s = act(s, 'call') // big blind
+    expect(legalActions(s, 0).canRaise).toBe(true)
+    expect(legalActions(s, 0).minRaiseTo).toBe(280)
   })
-  it('all-in call on a short stack runs the board out and conserves chips', () => {
-    let s = createGame({ ...DEFAULT_SETTINGS, bots: 1 })
-    s.players[1].stack = 300
-    s = reduce(s, { type: 'startHand', deck: newDeck() })
+  it('all-in call runs the board out and conserves chips', () => {
+    let s = deal([1000, 300])
     const before = totalChips(s)
     s = act(s, 'allin'); s = act(s, 'call')
     expect(s.phase).toBe('handOver')
@@ -190,70 +189,96 @@ describe('game', () => {
     expect(totalChips(s)).toBe(before)
   })
   it('awards the pot to the best hand', () => {
-    let s = createGame({ ...DEFAULT_SETTINGS, bots: 1 })
-    // deal order: first card to left of button. Compute rigged deck after seeing who is where.
-    const probe = reduce(s, { type: 'startHand', deck: newDeck() })
-    const btn = probe.button
-    const other = 1 - btn
-    // dealing alternates starting with `other`: other, btn, other, btn
-    const deck = rigged(`As Kd Ah Kc 2c 7d 9h Js 3s`) // other: As Ah ; btn: Kd Kc ; board 2c 7d 9h Js 3s
-    s = reduce(s, { type: 'startHand', deck })
-    s = act(s, 'allin'); s = act(s, 'call')
-    expect(s.result!.payouts[other]).toBeGreaterThan(0)
-    expect(s.result!.payouts[btn] ?? 0).toBe(0)
-    expect(s.result!.hands[other]).toBe('Pair')
+    // button 0 (heads-up): dealing starts with seat 1, then seat 0, twice
+    const s0 = deal([1000, 1000], 0, rigged('As Kd Ah Kc 2c 7d 9h Js 3s'))
+    let s = act(s0, 'allin'); s = act(s, 'call')
+    expect(s.result!.payouts[1]).toBeGreaterThan(0)
+    expect(s.result!.payouts[0] ?? 0).toBe(0)
+    expect(s.result!.hands[1]).toBe('Pair')
+  })
+  describe('foldOut', () => {
+    it('folds a player who is not acting and keeps the actor', () => {
+      let s = deal([1000, 1000, 1000, 1000], 0) // sb1 bb2, utg=3
+      expect(s.toAct).toBe(3)
+      s = foldOut(s, 1)
+      expect(s.players[1].folded).toBe(true)
+      expect(s.toAct).toBe(3)
+      expect(s.phase).toBe('betting')
+    })
+    it('folds the actor and moves on', () => {
+      let s = deal([1000, 1000, 1000, 1000], 0)
+      s = foldOut(s, 3)
+      expect(s.toAct).toBe(0)
+    })
+    it('ends the hand when one player is left', () => {
+      let s = deal([1000, 1000])
+      s = foldOut(s, 1)
+      expect(s.phase).toBe('handOver')
+      expect(s.result!.payouts[0]).toBe(20) // pays 10, big blind refunded 10
+    })
+    it('completes the round when the remaining players already matched', () => {
+      let s = deal([1000, 1000, 1000], 0) // actor 0
+      s = act(s, 'call')
+      s = act(s, 'call') // small blind completes; big blind has the option
+      expect(s.toAct).toBe(2)
+      s = foldOut(s, 1) // small blind leaves: only 0 and 2 left, 2 still has option
+      expect(s.phase).toBe('betting')
+      expect(s.toAct).toBe(2)
+      s = act(s, 'check')
+      expect(s.street).toBe('flop')
+    })
+    it('never folds an all-in player', () => {
+      let s = deal([1000, 100, 1000])
+      s = act(s, 'call')
+      s = act(s, 'allin')
+      const same = foldOut(s, 1)
+      expect(same).toBe(s)
+    })
   })
 })
 
 describe('property: random play', () => {
-  function playHand(s: GameState, rng: Rng, mode: 'random' | 'bots' | 'shove'): GameState {
-    s = reduce(s, { type: 'startHand', deck: shuffle(newDeck(), rng) })
+  function playHand(rng: Rng, n: number, mode: 'random' | 'shove'): void {
+    const stacks = Array.from({ length: n }, () => 20 + Math.floor(rng() * 40) * 50)
+    let s = deal(stacks, Math.floor(rng() * n), shuffle(newDeck(), rng))
     const start = totalChips(s)
     let guard = 0
     while (s.phase === 'betting') {
-      if (++guard > 200) throw new Error('hand did not terminate')
+      if (++guard > 300) throw new Error('hand did not terminate')
       const seat = s.toAct
       expect(seat).toBeGreaterThanOrEqual(0)
       const lg = legalActions(s, seat)
-      let next: GameState
-      if (mode === 'bots') {
-        const d = decide(s, seat, rng)
-        next = reduce(s, { type: 'act', handId: s.handId, seq: s.seq, seat, kind: d.kind, raiseTo: d.raiseTo })
-        if (next === s) throw new Error(`bot made illegal action ${JSON.stringify(d)}`)
-      } else {
-        const r = rng()
-        let kind: ActKind = lg.canCheck ? 'check' : 'call'
-        let raiseTo: number | undefined
-        if (mode === 'shove' && r < 0.5 && lg.canAllIn) kind = 'allin'
-        else if (r < 0.15) kind = lg.canCheck ? 'check' : 'fold'
-        else if (r < 0.4 && lg.canRaise) {
-          kind = 'raise'
-          raiseTo = lg.minRaiseTo + Math.floor(rng() * (lg.maxRaiseTo - lg.minRaiseTo + 1))
-        }
-        next = reduce(s, { type: 'act', handId: s.handId, seq: s.seq, seat, kind, raiseTo })
-        if (next === s) throw new Error(`illegal ${kind} ${raiseTo} ${JSON.stringify(lg)}`)
+      const r = rng()
+      let kind: ActKind = lg.canCheck ? 'check' : 'call'
+      let raiseTo: number | undefined
+      if (r < 0.04) { // someone leaves mid-hand
+        const idx = Math.floor(rng() * n)
+        const before = s
+        s = foldOut(s, idx)
+        if (s !== before) expect(totalChips(s)).toBe(start)
+        continue
       }
+      if (mode === 'shove' && r < 0.5 && lg.canAllIn) kind = 'allin'
+      else if (r < 0.2) kind = lg.canCheck ? 'check' : 'fold'
+      else if (r < 0.45 && lg.canRaise) {
+        kind = 'raise'
+        raiseTo = lg.minRaiseTo + Math.floor(rng() * (lg.maxRaiseTo - lg.minRaiseTo + 1))
+      }
+      const next = applyAction(s, { handId: s.handId, seq: s.seq, seat, kind, raiseTo })
+      if (next === s) throw new Error(`illegal ${kind} ${raiseTo} ${JSON.stringify(lg)}`)
       s = next
       expect(totalChips(s)).toBe(start)
       for (const p of s.players) expect(p.stack).toBeGreaterThanOrEqual(0)
     }
     expect(totalChips(s)).toBe(start)
-    expect(s.board.length === 0 || s.board.length === 5 || s.result!.showdown === false || s.board.length === 5).toBe(true)
     if (s.result!.showdown) expect(s.board).toHaveLength(5)
-    expect(Object.values(s.result!.payouts).reduce((a, b) => a + b, 0)).toBe(
-      s.players.reduce((a, p) => a + p.total, 0),
-    )
-    return s
+    expect(Object.values(s.result!.payouts).reduce((a, b) => a + b, 0)).toBe(s.players.reduce((a, p) => a + p.total, 0))
   }
-  for (const mode of ['random', 'bots', 'shove'] as const) {
-    for (const bots of [1, 2, 4]) {
-      it(`${mode} play with ${bots} bots`, () => {
-        const rng = seeded(1000 + bots)
-        let s = createGame({ ...DEFAULT_SETTINGS, bots })
-        for (let i = 0; i < 400; i++) {
-          if (s.players[0].stack === 0) s = reduce(s, { type: 'rebuy' })
-          s = playHand(s, rng, mode)
-        }
+  for (const mode of ['random', 'shove'] as const) {
+    for (const n of [2, 3, 6, 9]) {
+      it(`${mode} play with ${n} players`, () => {
+        const rng = seeded(500 + n)
+        for (let i = 0; i < 400; i++) playHand(rng, n, mode)
       })
     }
   }

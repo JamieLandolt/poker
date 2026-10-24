@@ -1,175 +1,257 @@
-import { useEffect, useRef, useState } from 'react'
-import { legalActions, type GameState, type Player, type Settings } from './engine/game.ts'
-import { CardView, Chips } from './ui.tsx'
-import { useGame } from './hooks.ts'
+import { useCallback, useEffect, useState } from 'react'
+import TableView from './TableView.tsx'
+import { api, configured, ensureUser, subscribeTable, type Live } from './net.ts'
+import { hue, money } from './hue.ts'
 
-function Seat({ p, state }: { p: Player; state: GameState }) {
-  const over = state.phase === 'handOver'
-  const reveal = over && state.result?.showdown && !p.folded
-  const isButton = state.button === p.id
-  const won = over ? state.result?.payouts[p.id] ?? 0 : 0
-  const net = won - p.total
-  const cls = ['seat px-2 py-1.5 text-center min-w-[7rem]']
-  if (state.toAct === p.id) cls.push('turn')
-  if (p.folded) cls.push('folded')
-  if (over && net > 0) cls.push('winner')
-  return (
-    <div className={cls.join(' ')}>
-      <div className="flex items-center justify-center gap-1 text-sm font-semibold">
-        {isButton && state.phase !== 'idle' && <span className="rounded-full bg-white text-black text-[10px] px-1.5 font-bold" title="Dealer button">D</span>}
-        {p.name}
-      </div>
-      <div className="text-xs text-amber-300"><Chips n={p.stack} /></div>
-      <div className="flex justify-center gap-1 my-1">
-        {p.hole.length === 2
-          ? p.hole.map((c, i) => <CardView key={i} card={c} hidden={!p.human && !reveal} dim={p.folded} />)
-          : [0, 1].map((i) => <CardView key={i} />)}
-      </div>
-      <div className="text-[11px] h-4 text-white/70 truncate">
-        {over && reveal && state.result?.hands[p.id]}
-        {over && net > 0 && <span className="text-green-400 font-bold"> +{net}</span>}
-        {!over && p.lastAction}
-      </div>
-      {p.bet > 0 && !over && <div className="text-[11px] text-amber-200">bet <Chips n={p.bet} /></div>}
-    </div>
-  )
-}
+const NAME_KEY = 'poker:name'
+const LOG_KEY = 'poker:log'
+const lsGet = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
+const lsSet = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* ignore */ } }
 
-function ActionBar({ state, act }: { state: GameState; act: (k: 'fold' | 'check' | 'call' | 'raise' | 'allin', r?: number) => void }) {
-  const lg = legalActions(state, 0)
-  const mine = state.toAct === 0 && state.phase === 'betting'
-  const me = state.players[0]
-  // The parent keys this component on (hand, seq), so the box resets for every decision.
-  const [amount, setAmount] = useState(() => String(lg.minRaiseTo || ''))
-  const pot = state.players.reduce((a, p) => a + p.total, 0)
-
-  const clamp = (v: number) => Math.min(lg.maxRaiseTo, Math.max(lg.minRaiseTo, Number.isFinite(v) ? Math.round(v) : lg.minRaiseTo))
-  const value = clamp(Number(amount))
-  const preset = (frac: number) => setAmount(String(clamp(state.currentBet + frac * (pot + lg.callAmount))))
-
-  const btn = 'rounded-lg px-4 py-2.5 font-semibold text-sm sm:text-base transition active:scale-95'
-  return (
-    <div className="w-full max-w-2xl mx-auto space-y-2">
-      <div className="flex gap-2 justify-center flex-wrap">
-        <button className={`${btn} bg-red-700`} disabled={!mine} onClick={() => act('fold')}>Fold</button>
-        {lg.canCheck
-          ? <button className={`${btn} bg-sky-700`} disabled={!mine} onClick={() => act('check')}>Check</button>
-          : <button className={`${btn} bg-sky-700`} disabled={!mine} onClick={() => act('call')}>
-              Call{mine ? ` ${lg.callAmount}` : ''}{mine && lg.callAmount >= me.stack ? ' (all-in)' : ''}
-            </button>}
-        <button className={`${btn} bg-amber-600`} disabled={!mine || !lg.canRaise} onClick={() => act(value >= lg.maxRaiseTo ? 'allin' : 'raise', value)}>
-          {state.currentBet === 0 ? 'Bet' : 'Raise to'} {lg.canRaise ? value : ''}
-        </button>
-        <button className={`${btn} bg-purple-700`} disabled={!mine || !lg.canAllIn} onClick={() => act('allin')}>All-in</button>
-      </div>
-      {mine && lg.canRaise && lg.minRaiseTo < lg.maxRaiseTo && (
-        <div className="flex items-center gap-2 justify-center flex-wrap text-xs">
-          <button className="rounded bg-white/10 px-2 py-1" onClick={() => preset(0.5)}>½ pot</button>
-          <button className="rounded bg-white/10 px-2 py-1" onClick={() => preset(0.75)}>¾ pot</button>
-          <button className="rounded bg-white/10 px-2 py-1" onClick={() => preset(1)}>pot</button>
-          <input type="range" className="w-40 accent-amber-500" min={lg.minRaiseTo} max={lg.maxRaiseTo} value={value} onChange={(e) => setAmount(e.target.value)} aria-label="Raise amount" />
-          <input type="number" inputMode="numeric" className="w-24 rounded bg-black/40 border border-white/20 px-2 py-1" min={lg.minRaiseTo} max={lg.maxRaiseTo} value={amount} onChange={(e) => setAmount(e.target.value)} onBlur={() => setAmount(String(value))} aria-label="Raise amount" />
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SettingsPanel({ settings, onApply, onClose }: { settings: Settings; onApply: (s: Settings) => void; onClose: () => void }) {
-  const [bots, setBots] = useState(settings.bots)
-  const [bb, setBb] = useState(settings.bigBlind)
-  const [stack, setStack] = useState(settings.startStack)
-  const valid = bb >= 2 && stack >= bb * 20
-  const field = 'w-full rounded bg-black/40 border border-white/20 px-2 py-1.5'
-  return (
-    <div className="fixed inset-0 z-20 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-neutral-900 rounded-2xl p-5 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold">New game</h2>
-        <label className="block text-sm">Opponents
-          <select className={field} value={bots} onChange={(e) => setBots(Number(e.target.value))}>
-            {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
-        <label className="block text-sm">Big blind (small blind is half)
-          <input className={field} type="number" min={2} step={2} value={bb} onChange={(e) => setBb(Math.max(0, Math.floor(Number(e.target.value))))} />
-        </label>
-        <label className="block text-sm">Starting chips (at least 20 big blinds)
-          <input className={field} type="number" min={bb * 20} step={100} value={stack} onChange={(e) => setStack(Math.max(0, Math.floor(Number(e.target.value))))} />
-        </label>
-        <div className="flex gap-2 justify-end">
-          <button className="rounded-lg px-4 py-2 bg-white/10" onClick={onClose}>Cancel</button>
-          <button className="rounded-lg px-4 py-2 bg-amber-600 font-semibold" disabled={!valid}
-            onClick={() => { onApply({ bots, bigBlind: bb, smallBlind: Math.max(1, Math.floor(bb / 2)), startStack: stack }); onClose() }}>
-            Start
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+function useHashCode() {
+  const read = () => location.hash.replace('#', '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5)
+  const [code, setCode] = useState(read)
+  useEffect(() => {
+    const f = () => setCode(read())
+    window.addEventListener('hashchange', f)
+    return () => window.removeEventListener('hashchange', f)
+  }, [])
+  return code
 }
 
 export default function App() {
-  const { state, deal, act, rebuy, newGame } = useGame()
-  const [showSettings, setShowSettings] = useState(false)
-  const logRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }) }, [state.log.length])
+  const code = useHashCode()
+  const [uid, setUid] = useState<string | null>(null)
+  const [authErr, setAuthErr] = useState('')
+  useEffect(() => {
+    if (!configured) return
+    ensureUser().then(setUid).catch(() => setAuthErr('Could not sign in. Check your connection and refresh.'))
+  }, [])
 
-  const pot = state.players.reduce((a, p) => a + p.total, 0)
-  const me = state.players[0]
-  const over = state.phase === 'handOver'
-  const bots = state.players.slice(1)
-  const myWin = over ? (state.result?.payouts[0] ?? 0) - me.total : 0
-  const busted = state.phase !== 'betting' && me.stack === 0
+  if (!configured) return <Shell><div className="glass p-6 max-w-md mx-auto text-center">Firebase is not configured yet. Add the VITE_FIREBASE_* values to <code>.env.local</code>.</div></Shell>
+  if (authErr) return <Shell><div className="glass p-6 max-w-md mx-auto text-center">{authErr}</div></Shell>
+  if (!uid) return <Shell><div className="text-center text-white/60 pt-24">Connecting…</div></Shell>
+  return <Shell>{code.length === 5 ? <TableScreen key={code} code={code} uid={uid} /> : <Landing />}</Shell>
+}
 
+function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-full flex flex-col p-2 sm:p-4 gap-2 max-w-4xl mx-auto">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-bold tracking-tight">♠ Poker</h1>
-        <div className="flex items-center gap-3 text-xs text-white/70">
-          <span>Hand {state.handId} · Blinds {state.settings.smallBlind}/{state.settings.bigBlind}</span>
-          <button className="rounded bg-white/10 px-2 py-1" onClick={() => setShowSettings(true)}>New game</button>
-        </div>
+    <div className="min-h-full max-w-7xl mx-auto px-3 sm:px-5 py-3">
+      <header className="flex items-center justify-between mb-2">
+        <a href="#" className="text-xl font-extrabold tracking-tight">♠ <span className="bg-gradient-to-r from-emerald-300 to-amber-300 bg-clip-text text-transparent">Poker</span></a>
       </header>
-
-      <div className="felt rounded-[2rem] sm:rounded-[3rem] flex-1 flex flex-col items-center justify-between gap-3 p-3 sm:p-6 min-h-[28rem]">
-        <div className="flex flex-wrap justify-center gap-2">{bots.map((p) => <Seat key={p.id} p={p} state={state} />)}</div>
-
-        <div className="flex flex-col items-center gap-2">
-          <div className="text-sm font-semibold text-amber-200">Pot <Chips n={over ? 0 : pot} /></div>
-          <div className="flex gap-1.5">
-            {[0, 1, 2, 3, 4].map((i) => <CardView key={i} card={state.board[i]} deal />)}
-          </div>
-          {over && state.result && (
-            <div className="text-center text-sm bg-black/60 rounded-xl px-3 py-2 max-w-sm">
-              {state.result.pots.map((a, i) => (
-                <div key={i}>
-                  {a.winners.map((id) => state.players[id].name).join(' & ')} won {a.amount}
-                  {state.result!.showdown ? ` with ${state.result!.hands[a.winners[0]]}` : ''}
-                </div>
-              ))}
-              {myWin !== 0 && <div className={myWin > 0 ? 'text-green-400 font-bold' : 'text-red-300'}>You {myWin > 0 ? 'won' : 'lost'} {Math.abs(myWin)} this hand</div>}
-            </div>
-          )}
-          {state.phase === 'idle' && <div className="text-white/80">Ready when you are.</div>}
-        </div>
-
-        <Seat p={me} state={state} />
-      </div>
-
-      <div className="min-h-[5.5rem]">
-        {state.phase === 'betting'
-          ? <ActionBar key={`${state.handId}:${state.seq}`} state={state} act={act} />
-          : busted
-            ? <div className="text-center space-y-2"><div>You're out of chips.</div><button className="rounded-lg px-5 py-2.5 bg-amber-600 font-semibold" onClick={rebuy}>Rebuy {state.settings.startStack.toLocaleString()}</button></div>
-            : <div className="text-center"><button className="rounded-lg px-6 py-3 bg-amber-600 font-bold text-lg active:scale-95" onClick={deal} autoFocus>{state.phase === 'idle' ? 'Deal' : 'Next hand'}</button></div>}
-      </div>
-
-      <div ref={logRef} className="h-24 overflow-y-auto rounded-lg bg-black/40 p-2 text-xs text-white/70 font-mono" aria-live="polite">
-        {state.log.map((l, i) => <div key={i}>{l}</div>)}
-      </div>
-      <footer className="text-center text-[11px] text-white/40">Play money only. Rebuys: {state.rebuys}</footer>
-
-      {showSettings && <SettingsPanel settings={state.settings} onApply={newGame} onClose={() => setShowSettings(false)} />}
+      {children}
     </div>
   )
 }
+
+const BLINDS = [[10, 20], [25, 50], [50, 100], [100, 200]]
+const toCents = (dollars: string) => Math.max(0, Math.round(Number(dollars) * 100) || 0)
+
+function Landing() {
+  const [blind, setBlind] = useState(0)
+  const [price, setPrice] = useState('5')
+  const [chips, setChips] = useState('2000')
+  const [joinCode, setJoinCode] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const field = 'w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2.5 outline-none focus:border-emerald-400'
+  const create = async () => {
+    setBusy(true); setErr('')
+    const [sb, bb] = BLINDS[blind]
+    const r = await api('create', { settings: { smallBlind: sb, bigBlind: bb, startStack: Math.floor(Number(chips)) || 0, buyInCents: toCents(price) } })
+    setBusy(false)
+    if (r.ok && r.code) location.hash = r.code
+    else setErr(r.error ?? 'Could not create a table')
+  }
+  return (
+    <div className="max-w-md mx-auto mt-10 space-y-4">
+      <div className="text-center space-y-1">
+        <h1 className="text-3xl font-extrabold">Play poker with friends</h1>
+        <p className="text-white/60">Texas Hold'em, play money. Make a table, share the link, deal.</p>
+      </div>
+      <div className="glass p-5 space-y-3">
+        <h2 className="font-bold">Create a table</h2>
+        <label className="block text-sm text-white/70">Blinds
+          <select className={field} value={blind} onChange={(e) => setBlind(Number(e.target.value))}>
+            {BLINDS.map(([s, b], i) => <option key={i} value={i}>{s} / {b}</option>)}
+          </select>
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-sm text-white/70">Buy-in price ($)
+            <input className={field} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0 = don't track" />
+          </label>
+          <label className="block text-sm text-white/70">Chips per buy-in
+            <input className={field} inputMode="numeric" value={chips} onChange={(e) => setChips(e.target.value)} />
+          </label>
+        </div>
+        <p className="text-xs text-white/40">e.g. $2 can buy 1,000 chips or 10,000, you decide. The leaderboard shows both chips and money.</p>
+        <button className="w-full rounded-xl px-4 py-3 font-bold bg-gradient-to-b from-emerald-400 to-emerald-600 text-black disabled:opacity-50" disabled={busy} onClick={create}>Create table</button>
+      </div>
+      <div className="glass p-5 space-y-3">
+        <h2 className="font-bold">Join with a code</h2>
+        <div className="flex gap-2">
+          <input className={`${field} uppercase tracking-widest text-center`} placeholder="ABCDE" maxLength={5} value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
+          <button className="rounded-xl px-5 font-bold bg-white/10 disabled:opacity-40" disabled={joinCode.length !== 5} onClick={() => { location.hash = joinCode }}>Join</button>
+        </div>
+      </div>
+      {err && <div className="text-center text-red-300 text-sm">{err}</div>}
+    </div>
+  )
+}
+
+function TableScreen({ code, uid }: { code: string; uid: string }) {
+  const [live, setLive] = useState<Live>({ status: 'loading', pub: null, hole: null, offset: 0, fromCache: false })
+  const [showJoin, setShowJoin] = useState(false)
+  const [wantSeat, setWantSeat] = useState<number | undefined>(undefined)
+  const [logOpen, setLogOpen] = useState(() => lsGet(LOG_KEY) === '1')
+  const [board, setBoard] = useState(false)
+  const [settings, setSettings] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => subscribeTable(code, uid, (p) => setLive((l) => ({ ...l, ...p }))), [code, uid])
+
+  const pub = live.pub
+  const mySeat = pub ? pub.seats.findIndex((s) => s?.uid === uid) : -1
+  const isOwner = pub?.ownerUid === uid
+  const toggleLog = () => setLogOpen((v) => { lsSet(LOG_KEY, v ? '0' : '1'); return !v })
+  const link = `${location.origin}/#${code}`
+  const copy = useCallback(async () => {
+    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ }
+  }, [link])
+
+  if (live.status === 'missing') return (
+    <div className="glass p-6 max-w-sm mx-auto text-center space-y-3 mt-10">
+      <div className="font-bold text-lg">Table not found</div>
+      <div className="text-white/60 text-sm">Check the link, or start a new table.</div>
+      <a href="#" className="inline-block rounded-xl px-5 py-2.5 bg-emerald-500 text-black font-bold">Create a table</a>
+    </div>
+  )
+  if (live.status === 'error') return <div className="glass p-6 max-w-sm mx-auto text-center mt-10">Lost connection. Retrying…</div>
+  if (!pub) return <div className="text-center text-white/60 pt-24">Loading table…</div>
+
+  const joined = mySeat >= 0
+  const chip = 'rounded-lg bg-white/10 hover:bg-white/15 px-3 py-1.5 text-xs font-semibold'
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
+        <span className="glass px-3 py-1.5 font-mono tracking-widest">{code}</span>
+        <button className={chip} onClick={copy}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
+        <button className={chip} onClick={() => setBoard((v) => !v)}>🏆 Leaderboard</button>
+        <button className={chip} onClick={toggleLog}>{logOpen ? 'Hide log' : 'Show log'}</button>
+        <span className="text-white/50 ml-auto">Blinds {pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
+        {joined && <button className={chip} onClick={() => void api('sitOut', { code, out: pub.seats[mySeat]?.status !== 'sitOut' }).then((r) => { if (!r.ok) alert(r.error) })}>{pub.seats[mySeat]?.status === 'sitOut' ? "I'm back" : 'Go AFK'}</button>}
+        {joined && <button className={`${chip} !text-red-300`} onClick={() => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }) }}>Leave</button>}
+        {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
+      </div>
+
+      <div className="lg:flex lg:items-start lg:gap-4">
+        <div className="flex-1 min-w-0">
+          <TableView code={code} uid={uid} live={live} mySeat={mySeat} logOpen={logOpen} onPickSeat={(s) => { setWantSeat(s); setShowJoin(true) }} />
+        </div>
+        {board && <Leaderboard pub={pub} uid={uid} isOwner={isOwner} code={code} onClose={() => setBoard(false)} />}
+      </div>
+
+      {!joined && (
+        <div className="text-center mt-3">
+          <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-emerald-600 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
+        </div>
+      )}
+
+      {!joined && showJoin && <JoinCard code={code} seat={wantSeat} full={pub.seats.every(Boolean)} onClose={() => setShowJoin(false)} />}
+      {settings && <SettingsCard code={code} pub={pub} onClose={() => setSettings(false)} />}
+    </div>
+  )
+}
+
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm grid place-items-center p-4" onClick={onClose}>
+      <div className="glass p-5 w-full max-w-md max-h-[85vh] overflow-y-auto" style={{ background: 'rgba(16,20,32,.96)' }} onClick={(e) => e.stopPropagation()}>{children}</div>
+    </div>
+  )
+}
+
+function JoinCard({ code, seat, full, onClose }: { code: string; seat?: number; full: boolean; onClose: () => void }) {
+  const [name, setName] = useState(() => lsGet(NAME_KEY) ?? '')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const go = async () => {
+    const n = name.trim()
+    if (!n) return setErr('Pick a nickname first')
+    lsSet(NAME_KEY, n)
+    setBusy(true)
+    const r = await api('sit', { code, name: n, seat })
+    setBusy(false)
+    if (r.ok) onClose(); else setErr(r.error ?? 'Could not join')
+  }
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-lg font-bold mb-1">Join table {code}</h2>
+      <p className="text-sm text-white/60 mb-3">{full ? 'The table is full right now.' : 'Choose a nickname. Everyone at the table will see it.'}</p>
+      <input autoFocus className="w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2.5 outline-none focus:border-emerald-400" placeholder="Nickname" maxLength={16} value={name}
+        onChange={(e) => { setName(e.target.value); setErr('') }} onKeyDown={(e) => { if (e.key === 'Enter') void go() }} />
+      {err && <div className="text-red-300 text-sm mt-2">{err}</div>}
+      <div className="flex gap-2 justify-end mt-4">
+        <button className="rounded-xl px-4 py-2 bg-white/10" onClick={onClose}>Just watch</button>
+        <button className="rounded-xl px-5 py-2 font-bold bg-emerald-500 text-black disabled:opacity-50" disabled={busy || full} onClick={go}>Take a seat</button>
+      </div>
+    </Modal>
+  )
+}
+
+function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engine/table.ts').PublicTable; uid: string; isOwner: boolean; code: string; onClose: () => void }) {
+  const paid = (pub.settings.buyInCents ?? 0) > 0
+  return (
+    <aside className="glass p-4 mt-3 lg:mt-14 lg:w-80 lg:shrink-0 lg:sticky lg:top-3 max-h-[85vh] overflow-y-auto">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-bold">🏆 Leaderboard</h2>
+        <button className="text-white/60" onClick={onClose}>✕</button>
+      </div>
+      <div className={`grid ${paid ? 'grid-cols-[1fr_auto_auto_auto_auto]' : 'grid-cols-[1fr_auto_auto_auto]'} gap-x-3 gap-y-1.5 text-sm items-center`}>
+        <div className="text-xs text-white/50">Player</div><div className="text-xs text-white/50 text-right">Buy-ins</div><div className="text-xs text-white/50 text-right">Chips</div><div className="text-xs text-white/50 text-right">Net chips</div>{paid && <div className="text-xs text-white/50 text-right">Net $</div>}
+        {pub.leaderboard.map((r) => (
+          <div key={r.uid} className="contents">
+            <div className={`flex items-center gap-2 ${r.seated ? '' : 'opacity-50'}`}>
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: `hsl(${hue(r.uid)} 60% 50%)` }} />
+              <span className="truncate">{r.name}{r.uid === uid ? ' (you)' : ''}{!r.seated ? ' · left' : ''}</span>
+              {isOwner && r.seated && r.uid !== uid && <button className="text-[10px] text-red-300 underline" onClick={() => { if (confirm(`Remove ${r.name}?`)) void api('kick', { code, target: r.uid }) }}>remove</button>}
+            </div>
+            <div className="text-right num font-bold">{r.buyIns}{paid && <span className="text-white/40 font-normal"> · {money(r.paidCents)}</span>}</div>
+            <div className="text-right num">{r.stack.toLocaleString()}</div>
+            <div className={`text-right num font-bold ${r.net > 0 ? 'text-emerald-300' : r.net < 0 ? 'text-rose-300' : ''}`}>{r.net > 0 ? '+' : ''}{r.net.toLocaleString()}</div>
+            {paid && <div className={`text-right num font-bold ${r.netCents > 0 ? 'text-emerald-300' : r.netCents < 0 ? 'text-rose-300' : ''}`}>{money(r.netCents, true) || '$0'}</div>}
+          </div>
+        ))}
+      </div>
+      {!pub.leaderboard.length && <div className="text-white/50 text-sm">No players yet.</div>}
+      <p className="text-[11px] text-white/40 mt-3">Net = what you hold now (chips on the table plus chips cashed out) minus what you bought in. Money is valued at this table's price per chip.</p>
+    </aside>
+  )
+}
+
+function SettingsCard({ code, pub, onClose }: { code: string; pub: import('./engine/table.ts').PublicTable; onClose: () => void }) {
+  const [bb, setBb] = useState(pub.pendingSettings?.bigBlind ?? pub.settings.bigBlind)
+  const [stack, setStack] = useState(pub.pendingSettings?.startStack ?? pub.settings.startStack)
+  const [price, setPrice] = useState(String((pub.pendingSettings?.buyInCents ?? pub.settings.buyInCents ?? 0) / 100))
+  const [err, setErr] = useState('')
+  const priceOk = Number.isFinite(Number(price)) && price.trim() !== ''
+  const save = async () => {
+    if (!Number.isFinite(bb) || !Number.isFinite(stack) || !priceOk) return setErr('Enter valid numbers')
+    const r = await api('settings', { code, settings: { smallBlind: Math.max(1, Math.floor(bb / 2)), bigBlind: bb, startStack: stack, buyInCents: toCents(price) } })
+    if (r.ok) onClose(); else setErr(r.error ?? 'Invalid settings')
+  }
+  const f = 'w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2'
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-lg font-bold mb-2">Table settings</h2>
+      <p className="text-xs text-white/50 mb-3">Changes apply from the next hand. New buy-ins use the new stack size.</p>
+      <label className="block text-sm mb-2">Big blind<input className={f} type="number" min={2} step={2} value={bb} onChange={(e) => setBb(Math.floor(Number(e.target.value)))} /></label>
+      <label className="block text-sm mb-2">Buy-in price ($, 0 = don't track money)<input className={f} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
+      <label className="block text-sm mb-2">Chips per buy-in (at least 20 big blinds)<input className={f} type="number" min={bb * 20} step={100} value={stack} onChange={(e) => setStack(Math.floor(Number(e.target.value)))} /></label>
+      {err && <div className="text-red-300 text-sm">{err}</div>}
+      <div className="flex gap-2 justify-end mt-3"><button className="rounded-xl px-4 py-2 bg-white/10" onClick={onClose}>Cancel</button><button className="rounded-xl px-5 py-2 font-bold bg-emerald-500 text-black" onClick={save}>Save</button></div>
+    </Modal>
+  )
+}
+
