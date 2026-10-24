@@ -1,0 +1,46 @@
+@import 'tailwindcss';
+
+:root {
+  color-scheme: dark;
+  --felt: #0f5a43;
+  --felt-dark: #0b3d2e;
+  --rail: #3a2414;
+  --gold: #f5c451;
+}
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: radial-gradient(circle at 50% 30%, #12261f, #070d0b 70%);
+  color: #f1f5f2;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.4; }
+
+.felt {
+  background: radial-gradient(ellipse at center, var(--felt), var(--felt-dark));
+  border: 10px solid var(--rail);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5), 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+.card {
+  width: 2.6rem; height: 3.7rem; border-radius: 0.4rem; background: #fafafa; color: #111;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-weight: 700; line-height: 1; box-shadow: 0 2px 6px rgba(0,0,0,.45); font-size: 1.05rem;
+}
+.card.red { color: #c81e1e; }
+.card .suit { font-size: 1.3rem; }
+.card.back {
+  background: repeating-linear-gradient(45deg, #1e3a8a, #1e3a8a 4px, #2b4fb5 4px, #2b4fb5 8px);
+  border: 2px solid #fafafa;
+}
+.card.empty { background: rgba(255,255,255,.06); box-shadow: none; border: 1px dashed rgba(255,255,255,.2); }
+.card.dim { opacity: .45; }
+.card.hit { outline: 2px solid var(--gold); }
+@media (min-width: 640px) { .card { width: 3.2rem; height: 4.5rem; font-size: 1.25rem; } .card .suit { font-size: 1.6rem; } }
+@keyframes pop { from { transform: translateY(-8px) scale(.9); opacity: 0 } to { transform: none; opacity: 1 } }
+.card.deal { animation: pop .25s ease-out; }
+.seat { background: rgba(0,0,0,.55); border: 2px solid rgba(255,255,255,.12); border-radius: 1rem; }
+.seat.turn { border-color: var(--gold); box-shadow: 0 0 14px rgba(245,196,81,.6); }
+.seat.folded { opacity: .45; }
+.seat.winner { border-color: #4ade80; box-shadow: 0 0 16px rgba(74,222,128,.6); }
