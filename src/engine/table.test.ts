@@ -402,3 +402,54 @@ describe('property: chaos', () => {
     check(t)
   })
 })
+
+describe('busting out', () => {
+  /** Heads-up all-in until someone loses everything (skips split pots). */
+  function bust() {
+    for (let seed = 1; seed < 200; seed++) {
+      const r = setup(2, seeded(seed))
+      const { t, now } = r
+      act(t, actor(t), { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'allin' }, now)
+      act(t, actor(t), { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'call' }, now)
+      const loser = t.seats.find((x) => x && x.stack === 0)
+      if (loser) return { ...r, loser, winner: t.seats.find((x) => x && x.stack > 0)! }
+    }
+    throw new Error('no bust found')
+  }
+  it('marks the loser busted, stops dealing, and resumes when they rebuy', () => {
+    const { t, now, d, loser, winner } = bust()
+    expect(loser.status).toBe('busted')
+    tick(t, now + 10_000, d)
+    tick(t, now + 20_000, d)
+    expect(t.phase).not.toBe('betting') // one player cannot play alone
+    rebuy(t, loser.uid)
+    tick(t, now + 21_000, d)
+    tick(t, now + 30_000, d)
+    expect(t.phase).toBe('betting')
+    expect(winner.stack).toBeGreaterThan(0)
+    check(t)
+  })
+  it('a busted player can leave, keeps their record, and may come back', () => {
+    const { t, now, loser } = bust()
+    const uid = loser.uid
+    leave(t, uid, now + 1)
+    expect(seatOf(t, uid)).toBe(-1)
+    expect(t.records[uid].buyIns).toBe(1)
+    check(t)
+    sit(t, uid, 'Back', undefined, now + 2)
+    expect(t.records[uid].buyIns).toBe(2)
+    check(t)
+  })
+  it('an abandoned busted seat is freed after a while', () => {
+    const { t, now, d, loser } = bust()
+    const far = now + 6 * 60_000
+    t.seats.forEach((x) => { if (x) x.lastSeen = far })
+    tick(t, far, d)
+    expect(seatOf(t, loser.uid)).toBe(-1)
+    check(t)
+  })
+  it('a busted player cannot go AFK without rebuying first', () => {
+    const { t, now, loser } = bust()
+    expect(() => setSitOut(t, loser.uid, true, now)).toThrow(TableError)
+  })
+})
