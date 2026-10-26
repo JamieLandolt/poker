@@ -184,24 +184,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
 
   const joined = mySeat >= 0
   const isHost = pub.ownerUid === uid || pub.creatorUid === uid
-  // No separate spectator view: without a seat you are in the lobby-style join screen. AFK players keep their seat.
-  if (!joined) {
-    const names = pub.seats.filter((x) => x).map((x) => x!.name)
-    return (
-      <div className="max-w-md mx-auto mt-10 space-y-3">
-        <div className="glass p-5 text-center space-y-3">
-          <div className="font-mono font-bold tracking-widest text-2xl">{code}</div>
-          <div className="text-white/70 text-sm">{pub.settings.smallBlind}/{pub.settings.bigBlind} blinds{names.length ? ` · ${names.join(', ')}` : ''}</div>
-          <button className="w-full rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
-          {isHost && <button className="w-full rounded-xl px-6 py-2.5 font-semibold bg-white/10" onClick={() => setShowHistory(true)}>History</button>}
-          <a href="#" className="block text-sm text-white/60">Back to lobby</a>
-        </div>
-        {showJoin && <JoinCard code={code} seat={wantSeat} full={pub.seats.every(Boolean)} onClose={() => setShowJoin(false)} />}
-        {showHistory && <HistoryCard code={code} onClose={() => setShowHistory(false)} />}
-      </div>
-    )
-  }
-  const chip = 'rounded-lg bg-white/10 hover:bg-white/15 px-3 py-1.5 text-xs font-semibold'
+    const chip = 'rounded-lg bg-white/10 hover:bg-white/15 px-3 py-1.5 text-xs font-semibold'
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="relative flex-none mb-1">
@@ -271,6 +254,15 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
         )}
       </div>
 
+      {!joined && (
+        <div className="flex flex-wrap justify-center gap-2 py-2 flex-none">
+          <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
+          {isHost && <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setShowHistory(true)}>History</button>}
+          <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => { location.hash = '' }}>Back to lobby</button>
+        </div>
+      )}
+
+      {!joined && showJoin && <JoinCard code={code} seat={wantSeat} full={pub.seats.every(Boolean)} onClose={() => setShowJoin(false)} />}
       {showHistory && <HistoryCard code={code} onClose={() => setShowHistory(false)} />}
       {settings && <SettingsCard code={code} pub={pub} onClose={() => setSettings(false)} />}
     </div>
