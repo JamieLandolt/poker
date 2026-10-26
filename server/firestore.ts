@@ -75,8 +75,13 @@ export const firestoreStore: Store = {
     return out
   },
   async hostTables(uid, since) {
-    const snap = await getFirestore(app()).collection(`hosts/${uid}/tables`).get()
-    return snap.docs.map((d) => ({ code: d.id, at: Number(d.data().at) })).filter((x) => x.at >= since).sort((a, b) => b.at - a.at)
+    const db = getFirestore(app())
+    const [idx, owned] = await Promise.all([db.collection(`hosts/${uid}/tables`).get(), db.collection('tables').where('ownerUid', '==', uid).get()])
+    const byCode = new Map<string, number>()
+    idx.forEach((d) => byCode.set(d.id, Number(d.data().at)))
+    // Tables from before the index existed are found through their current owner.
+    owned.forEach((d) => byCode.set(d.id, Math.max(byCode.get(d.id) ?? 0, d.data().updatedAt?.toMillis?.() ?? 0)))
+    return [...byCode].map(([code, at]) => ({ code, at })).filter((x) => x.at >= since).sort((a, b) => b.at - a.at)
   },
   async ping(code, uid, now) {
     const db = getFirestore(app())

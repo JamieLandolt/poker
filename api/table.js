@@ -194853,8 +194853,12 @@ var firestoreStore = {
     return out;
   },
   async hostTables(uid, since) {
-    const snap = await getFirestore(app()).collection(`hosts/${uid}/tables`).get();
-    return snap.docs.map((d) => ({ code: d.id, at: Number(d.data().at) })).filter((x2) => x2.at >= since).sort((a, b) => b.at - a.at);
+    const db = getFirestore(app());
+    const [idx, owned] = await Promise.all([db.collection(`hosts/${uid}/tables`).get(), db.collection("tables").where("ownerUid", "==", uid).get()]);
+    const byCode = /* @__PURE__ */ new Map();
+    idx.forEach((d) => byCode.set(d.id, Number(d.data().at)));
+    owned.forEach((d) => byCode.set(d.id, Math.max(byCode.get(d.id) ?? 0, d.data().updatedAt?.toMillis?.() ?? 0)));
+    return [...byCode].map(([code, at]) => ({ code, at })).filter((x2) => x2.at >= since).sort((a, b) => b.at - a.at);
   },
   async ping(code, uid, now) {
     const db = getFirestore(app());
