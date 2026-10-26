@@ -3,7 +3,7 @@ import { newDeck, shuffle, type Card, type Rng } from './cards.ts'
 import { legalActions } from './game.ts'
 import {
   act, chipCheck, createTable, migrate, setPaused, DEFAULT_TABLE_SETTINGS, holeCards, kick, leave, publicView, rebuy, seatOf,
-  setSitOut, sit, tick, TableError, type Table, AWAY_LEAVE_MS, GRACE_MS,
+  setSitOut, showHand, sit, tick, TableError, type Table, AWAY_LEAVE_MS, GRACE_MS,
 } from './table.ts'
 
 function seeded(seed: number): Rng {
@@ -451,5 +451,19 @@ describe('busting out', () => {
   it('a busted player cannot go AFK without rebuying first', () => {
     const { t, now, loser } = bust()
     expect(() => setSitOut(t, loser.uid, true, now)).toThrow(TableError)
+  })
+})
+
+describe('showing cards', () => {
+  it('a folded player can show after the hand, not before', () => {
+    const { t, now } = setup(2)
+    const a = actor(t)
+    expect(() => showHand(t, a)).toThrow(TableError)
+    act(t, a, { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'fold' }, now)
+    expect(t.phase).toBe('handOver')
+    expect(publicView(t, now).seats.find((x) => x?.uid === a)!.cards).toBeNull()
+    showHand(t, a)
+    expect(publicView(t, now).seats.find((x) => x?.uid === a)!.cards).toHaveLength(2)
+    expect(t.ledger.some((l) => l.includes('shows'))).toBe(true)
   })
 })

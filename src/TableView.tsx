@@ -72,6 +72,27 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
       len: pub.board.length,
     })
   }
+  // When a betting round closes, the matched chips stay put for a beat, then slide into the pot.
+  const [snap, setSnap] = useState(pub)
+  const [sweep, setSweep] = useState<{ id: string; items: { seat: number; amount: number; fresh: boolean }[] } | null>(null)
+  if (snap.handId !== pub.handId || snap.seq !== pub.seq) {
+    if (snap.handId === pub.handId && snap.phase === 'betting' && (pub.street !== snap.street || pub.phase !== 'betting')) {
+      const items = snap.seats.flatMap((x) => {
+        if (!x || !x.inHand) return []
+        const foldedNow = pub.seats[x.seat]?.folded ?? x.folded
+        const amount = foldedNow || x.allIn ? x.bet : Math.max(x.bet, snap.currentBet)
+        return amount > 0 ? [{ seat: x.seat, amount, fresh: x.bet < amount }] : []
+      })
+      setSweep({ id: `${pub.handId}-${pub.seq}`, items })
+    }
+    setSnap(pub)
+  }
+  const sweepId = sweep?.id
+  useEffect(() => {
+    if (!sweepId) return
+    const id = setTimeout(() => setSweep(null), 1500)
+    return () => clearTimeout(id)
+  }, [sweepId])
   // The deal plays once: after it has finished the cards are plain elements and can never replay.
   const [settled, setSettled] = useState(-1)
   const nSeated = pub.seats.filter((x) => x?.inHand).length
@@ -171,7 +192,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   const group = (i: number) => (i < 3 ? 0 : i - 2)
   const boardFly = (i: number) => {
     if (i < gate.base || i < gate.batch) return null
-    const delay = (group(i) - group(gate.batch)) * 900 + (i < 3 ? (i - gate.batch) * 160 : 0)
+    const delay = (group(i) - group(gate.batch)) * 900 + (i < 3 ? (i - gate.batch) * 160 : 0) + 700
     const bx = cx + (i - 2) * (boardCw + 8)
     return { dx: deck.x - bx, dy: deck.y - boardY, rot: -12, delay, flipAt: delay + 380 }
   }
@@ -239,11 +260,12 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
             )
           }
           const isMe = s.uid === uid
-          const betSpot = { x: p.x + (cx - p.x) * 0.5, y: p.y + (cy - p.y) * 0.5 }
           const dealIdx = order.indexOf(s.seat)
           const face = (c: number): Card | null => (isMe ? holeOk?.[c] ?? null : s.cards?.[c] ?? null)
-          const showCards = s.inHand && !(pub.phase === 'handOver' && s.folded)
+          const showCards = s.inHand && (!(pub.phase === 'handOver' && s.folded) || !!s.cards)
           const cardW = isMe ? heroCw : cw
+          // Bottom-half seats have their cards between the plate and the table centre; keep the bet clear of them.
+          const betSpot = { x: p.x + (cx - p.x) * 0.5, y: p.y + (cy - p.y) * 0.5 - (p.y > cy ? cardW * 1.5 : 0) }
           const fly = (c: number) => {
             if (!animating || dealIdx < 0) return null
             const delay = (c * nDeal + dealIdx) * DEAL_STEP
@@ -297,6 +319,13 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                   <Chips amount={s.bet} bigBlind={pub.settings.bigBlind} fly={{ dx: p.x - betSpot.x, dy: p.y - betSpot.y, delay: animating && pub.street === 'preflop' ? dealTotal : 0 }} />
                 </div>
               )}
+              {sweep && sweep.items.filter((it) => it.seat === s.seat).map((it) => (
+                <div key={`sw-${sweep.id}`} className="absolute" style={{ left: betSpot.x, top: betSpot.y, transform: 'translate(-50%, -50%)', zIndex: 4 }}>
+                  <div className="chip-sweep" style={{ ['--dx' as string]: `${potSpot.x - betSpot.x}px`, ['--dy' as string]: `${potSpot.y - betSpot.y}px` }}>
+                    <Chips amount={it.amount} bigBlind={pub.settings.bigBlind} fly={it.fresh ? { dx: p.x - betSpot.x, dy: p.y - betSpot.y, delay: 0 } : undefined} />
+                  </div>
+                </div>
+              ))}
               {s.bet === 0 && pub.phase === 'betting' && s.lastAction === 'checks' && (
                 <div className="absolute" style={{ left: betSpot.x, top: betSpot.y, transform: 'translate(-50%, -50%)' }} key={`chk-${pub.handId}-${pub.street}-${s.seat}`}>
                   <span className="check-pill">CHECK</span>
@@ -315,6 +344,11 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
       {/* actions */}
       <div className="flex-none min-h-[72px]">
+        {myPub && pub.phase === 'handOver' && myPub.inHand && !myPub.cards && holeOk && (
+          <div className="text-center mb-1">
+            <button className="rounded-xl px-5 py-2 font-semibold bg-white/10 hover:bg-white/15" disabled={busy} onClick={() => send('show')}>Show cards</button>
+          </div>
+        )}
         {myPub && myTurn && pub.legal ? (
           <ActionBar key={`${pub.handId}-${pub.seq}`} pub={pub} lg={pub.legal} myStack={myPub.stack} busy={busy} onAct={act} />
         ) : myPub && pub.phase === 'betting' && myPub.inHand && !myPub.folded && !myPub.allIn && myPub.stack > 0 ? (

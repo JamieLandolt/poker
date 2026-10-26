@@ -1,5 +1,5 @@
 import type { Card } from './cards.ts'
-import { applyAction, dealHand, foldOut, legalActions, type HandState, type Legal } from './game.ts'
+import { applyAction, cardText, dealHand, foldOut, legalActions, type HandState, type Legal } from './game.ts'
 
 // ---------- types ----------
 
@@ -64,6 +64,8 @@ export interface Table {
   ledger: string[]
   /** How many lines of the current hand's log are already in the ledger. */
   ledgerHandLen: number
+  /** Players who chose to show their cards after the hand. */
+  shown: string[]
   settings: TableSettings
   /** Applied at the start of the next hand. */
   pendingSettings: TableSettings | null
@@ -135,6 +137,7 @@ export function migrate(t: Table): Table {
   t.creatorUid ??= t.ownerUid
   t.ledger ??= []
   t.ledgerHandLen ??= 0
+  t.shown ??= []
   for (const s of t.seats) {
     if (!s) continue
     s.afkHands ??= 0
@@ -151,7 +154,7 @@ export function createTable(code: string, ownerUid: string, settings: TableSetti
   validateSettings(settings)
   void now
   const t: Table = {
-    code, ownerUid, creatorUid: ownerUid, ledger: [], ledgerHandLen: 0, settings, pendingSettings: null, seats: Array(MAX_SEATS).fill(null), button: -1,
+    code, ownerUid, creatorUid: ownerUid, ledger: [], ledgerHandLen: 0, shown: [], settings, pendingSettings: null, seats: Array(MAX_SEATS).fill(null), button: -1,
     handCount: 0, phase: 'waiting', hand: null, nextHandAt: null, deadline: null, actorUid: null, paused: false, pausedAt: null, records: {}, version: 0,
   }
   note(t, `Table ${code} created, blinds ${n(settings.smallBlind)}/${n(settings.bigBlind)}, ${n(settings.startStack)} chips per buy-in${settings.buyInCents ? ` at $${(settings.buyInCents / 100).toFixed(2)}` : ''}`)
@@ -343,6 +346,19 @@ export function rename(t: Table, uid: string, rawName: unknown): void {
 
 // ---------- playing ----------
 
+/** After a hand, a player may turn their cards face up for everyone. */
+export function showHand(t: Table, uid: string): void {
+  const hi = handIdx(t, uid)
+  if (t.phase !== 'handOver' || !t.hand || hi < 0) fail('Nothing to show')
+  if (t.shown.includes(uid)) return
+  t.shown.push(uid)
+  const hp = t.hand!.players[hi]
+  const [a, b] = hp.hole
+  note(t, `${hp.name} shows ${cardText(a)} ${cardText(b)}`)
+  touch(t)
+}
+
+
 export function act(t: Table, uid: string, a: { handId: number; seq: number; kind: 'fold' | 'check' | 'call' | 'raise' | 'allin'; raiseTo?: number }, now: number): boolean {
   if (t.phase !== 'betting' || !t.hand) return false
   const hi = handIdx(t, uid)
@@ -452,6 +468,7 @@ function startNextHand(t: Table, deck: Card[], now: number): boolean {
   t.actorUid = null
   for (const s of seats) t.seats[s]!.stack = t.hand.players.find((p) => p.seat === s)!.stack
   t.ledgerHandLen = 0
+  t.shown = []
   afterHandChange(t, now, true)
   return true
 }
@@ -576,7 +593,7 @@ export function publicView(t: Table, now: number): PublicTable {
       inHand: !!hp, folded: !!hp?.folded, allIn: !!hp?.allIn,
       bet: hp && t.phase === 'betting' ? hp.bet : 0,
       lastAction: hp ? hp.lastAction : '',
-      cards: reveal && hp && !hp.folded ? hp.hole : null,
+      cards: hp && ((reveal && !hp.folded) || (t.phase === 'handOver' && t.shown.includes(s.uid))) ? hp.hole : null,
       away: false,
     }
   })

@@ -298,7 +298,7 @@ function dealStreet(state: GameState): GameState {
   }
 }
 
-const cardText = (c: Card) => `${'..23456789TJQKA'[c.rank]}${c.suit}`
+export const cardText = (c: Card) => `${'..23456789TJQKA'[c.rank]}${c.suit}`
 
 function finishHand(state: GameState, showdown: boolean): GameState {
   const { refund, pots } = buildPots(state.players.map((p) => ({ id: p.id, total: p.total, folded: p.folded })))

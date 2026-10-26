@@ -1,6 +1,6 @@
 import { newDeck, secureRng, shuffle, type Card } from '../src/engine/cards.ts'
 import {
-  act, cleanName, createTable, holeCards, kick, leave, migrate, publicView, rebuy, rename, setPaused, setSettings, setSitOut, sit, tick,
+  act, cleanName, createTable, holeCards, kick, leave, migrate, publicView, rebuy, rename, setPaused, setSettings, setSitOut, showHand, sit, tick,
   DEFAULT_TABLE_SETTINGS, TableError, type Table, type TableSettings,
 } from '../src/engine/table.ts'
 
@@ -120,6 +120,7 @@ export async function handle(uid: string, req: Request, deps: HandlerDeps): Prom
         case 'kick': kick(t, uid, String(req.target ?? ''), now); break
         case 'settings': setSettings(t, uid, parseSettings(req.settings)); break
         case 'rename': rename(t, uid, req.name); break
+        case 'show': showHand(t, uid); break
         case 'pause': setPaused(t, uid, !!req.on, now); break
         case 'act': {
           const kind = String(req.kind)

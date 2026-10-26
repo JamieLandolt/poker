@@ -194317,6 +194317,7 @@ function migrate(t2) {
   t2.creatorUid ??= t2.ownerUid;
   t2.ledger ??= [];
   t2.ledgerHandLen ??= 0;
+  t2.shown ??= [];
   for (const s2 of t2.seats) {
     if (!s2) continue;
     s2.afkHands ??= 0;
@@ -194337,6 +194338,7 @@ function createTable(code, ownerUid, settings, now) {
     creatorUid: ownerUid,
     ledger: [],
     ledgerHandLen: 0,
+    shown: [],
     settings,
     pendingSettings: null,
     seats: Array(MAX_SEATS).fill(null),
@@ -194533,6 +194535,16 @@ function rename(t2, uid, rawName) {
   if (seat >= 0) t2.seats[seat].name = finalName;
   touch(t2);
 }
+function showHand(t2, uid) {
+  const hi = handIdx(t2, uid);
+  if (t2.phase !== "handOver" || !t2.hand || hi < 0) fail("Nothing to show");
+  if (t2.shown.includes(uid)) return;
+  t2.shown.push(uid);
+  const hp = t2.hand.players[hi];
+  const [a, b] = hp.hole;
+  note(t2, `${hp.name} shows ${cardText(a)} ${cardText(b)}`);
+  touch(t2);
+}
 function act(t2, uid, a, now) {
   if (t2.phase !== "betting" || !t2.hand) return false;
   const hi = handIdx(t2, uid);
@@ -194642,6 +194654,7 @@ function startNextHand(t2, deck, now) {
   t2.actorUid = null;
   for (const s2 of seats) t2.seats[s2].stack = t2.hand.players.find((p) => p.seat === s2).stack;
   t2.ledgerHandLen = 0;
+  t2.shown = [];
   afterHandChange(t2, now, true);
   return true;
 }
@@ -194719,7 +194732,7 @@ function publicView(t2, now) {
       allIn: !!hp?.allIn,
       bet: hp && t2.phase === "betting" ? hp.bet : 0,
       lastAction: hp ? hp.lastAction : "",
-      cards: reveal && hp && !hp.folded ? hp.hole : null,
+      cards: hp && (reveal && !hp.folded || t2.phase === "handOver" && t2.shown.includes(s2.uid)) ? hp.hole : null,
       away: false
     };
   });
@@ -194975,6 +194988,9 @@ async function handle(uid, req, deps) {
           break;
         case "rename":
           rename(t2, uid, req.name);
+          break;
+        case "show":
+          showHand(t2, uid);
           break;
         case "pause":
           setPaused(t2, uid, !!req.on, now);
