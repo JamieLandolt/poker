@@ -192,7 +192,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
         {/* centre: pot, deck, board */}
         <div className="absolute" style={{ left: potSpot.x, top: potSpot.y, transform: 'translate(-50%, -50%)' }}>
-          <PotDisplay amount={pub.phase === 'betting' ? pub.pot - pub.seats.reduce((a, s) => a + (s?.bet ?? 0), 0) : pub.pot} />
+          <PotDisplay amount={pub.pot} />
         </div>
         <div className="absolute" style={{ left: deck.x, top: deck.y, transform: 'translate(-50%, -50%)' }}>
           {[2, 1, 0].map((i) => <div key={i} className="absolute" style={{ left: -boardCw / 2 + i * 1.5, top: -boardCw * 0.7 - i * 1.5 }}><PlayingCard faceUp={false} width={boardCw} /></div>)}
