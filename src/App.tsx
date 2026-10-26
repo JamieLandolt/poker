@@ -207,14 +207,11 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
       )}
 
       {themes && (
-        <div className="glass absolute left-0 right-0 top-full mt-2 z-40 px-3 py-2 flex items-center gap-3 flex-wrap text-xs" style={{ background: 'rgba(16,20,32,.97)' }}>
-          <span className="text-white/60">Table</span>
+        <div className="glass absolute left-0 right-0 lg:right-[21.5rem] top-full mt-2 z-40 px-3 py-2 flex items-center gap-3 flex-wrap text-xs" style={{ background: 'rgba(16,20,32,.97)' }}>
           {TABLE_THEMES.map(([id, label, bg]) => (
             <button key={id} title={label} aria-label={label} className={`swatch ${tableTheme === id ? 'on' : ''}`} style={{ background: bg }}
               onClick={() => { setTableTheme(id); lsSet(THEME_KEY, id) }} />
           ))}
-          <span className="text-white/50">{TABLE_THEMES.find((t) => t[0] === tableTheme)?.[1]}</span>
-          <span className="text-white/60 ml-3">Deck</span>
           {DECKS.map(([id, label]) => (
             <button key={id} title={label} aria-label={`${label} deck`}
               className={`rounded-xl px-2.5 py-2 flex flex-col items-center gap-1.5 font-semibold ${deckStyle === id ? 'bg-white/20 ring-2 ring-white' : 'bg-white/10 hover:bg-white/15'}`}
@@ -227,7 +224,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           ))}
           <button className={`rounded-lg px-3 py-1.5 font-semibold ${fourColour ? 'bg-white text-black' : 'bg-white/10'}`}
             onClick={() => { setFourColour((v) => { lsSet(FACES_KEY, v ? '0' : '1'); return !v }) }}>
-            Four-colour faces
+            Accessible suit colours
           </button>
         </div>
       )}
