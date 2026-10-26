@@ -11,11 +11,11 @@ const FACES_KEY = 'poker:faces'
 const DECKS: [string, string][] = [['indigo', 'Indigo'], ['crimson', 'Crimson'], ['emerald', 'Emerald'], ['gold', 'Gold'], ['midnight', 'Midnight']]
 const TABLE_THEMES: [string, string, string][] = [
   // [id, label, preview = felt colours inside, rail colours as the ring]
-  ['classic', 'Lime green', 'radial-gradient(circle at 40% 35%,#86b02a,#2f4d0d 90%) padding-box, linear-gradient(145deg,#2b2f3d,#12141c) border-box'],
-  ['midnight', 'Midnight blue', 'radial-gradient(circle at 40% 35%,#21468f,#0a1838 90%) padding-box, linear-gradient(145deg,#b9c4dd,#4a5878 55%,#232b40) border-box'],
+  ['classic', 'Lime green', 'radial-gradient(circle at 40% 35%,#6b8f1f,#213808 90%) padding-box, linear-gradient(145deg,#2b2f3d,#12141c) border-box'],
+  ['midnight', 'Midnight blue', 'radial-gradient(circle at 40% 35%,#0b3347,#04121c 90%) padding-box, linear-gradient(120deg,#22d3ee,#5eead4 45%,#facc15) border-box'],
   ['crimson', 'Crimson velvet', 'radial-gradient(circle at 40% 35%,#9a2233,#3a0911 90%) padding-box, linear-gradient(145deg,#6b3d1d,#2c1608 60%,#170b04) border-box'],
   ['noir', 'Noir & gold', 'radial-gradient(circle at 40% 35%,#2c2c33,#0a0a0d 90%) padding-box, linear-gradient(145deg,#f5d37a,#b8892b 55%,#6e4f12) border-box'],
-  ['neon', 'Neon', 'radial-gradient(circle at 40% 35%,#0b3347,#04121c 90%) padding-box, linear-gradient(120deg,#22d3ee,#5eead4 45%,#facc15) border-box'],
+  ['neon', 'Neon', 'radial-gradient(circle at 40% 35%,#0f5a36,#04180e 90%) padding-box, linear-gradient(120deg,#6ee7b7,#a3e635 50%,#fde047) border-box'],
   ['violet', 'Violet', 'radial-gradient(circle at 40% 35%,#5d2b8f,#1f0b38 90%) padding-box, linear-gradient(145deg,#3a3550,#17141f) border-box'],
 ]
 const lsGet = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
@@ -44,16 +44,16 @@ export default function App() {
   if (!configured) return <Shell><div className="glass p-6 max-w-md mx-auto text-center">Firebase is not configured yet. Add the VITE_FIREBASE_* values to <code>.env.local</code>.</div></Shell>
   if (authErr) return <Shell><div className="glass p-6 max-w-md mx-auto text-center">{authErr}</div></Shell>
   if (!uid) return <Shell><div className="text-center text-white/60 pt-24">Connecting…</div></Shell>
-  return <Shell>{code.length === 5 ? <TableScreen key={code} code={code} uid={uid} /> : <Landing />}</Shell>
+  return <Shell>{code.length === 5 ? <TableScreen key={code} code={code} uid={uid} /> : <div className="h-full overflow-y-auto"><Landing /></div>}</Shell>
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-full max-w-7xl mx-auto px-3 sm:px-5 py-3">
-      <header className="flex items-center justify-between mb-2">
+    <div className="h-[100dvh] max-w-7xl mx-auto px-3 sm:px-5 py-2 flex flex-col overflow-hidden">
+      <header className="flex items-center justify-between mb-1 flex-none">
         <a href="#" className="text-xl font-extrabold tracking-tight">♠ <span className="bg-gradient-to-r from-emerald-300 to-yellow-300 bg-clip-text text-transparent">Poker</span></a>
       </header>
-      {children}
+      <div className="flex-1 min-h-0 flex flex-col">{children}</div>
     </div>
   )
 }
@@ -120,6 +120,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const [board, setBoard] = useState(false)
   const [settings, setSettings] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [menu, setMenu] = useState(false)
   const [codeCopied, setCodeCopied] = useState(false)
   const [tableTheme, setTableTheme] = useState(() => { const v = lsGet(THEME_KEY); return TABLE_THEMES.some((t) => t[0] === v) ? (v as string) : 'classic' })
   const [deckStyle, setDeckStyle] = useState(() => { const v = lsGet(DECK_KEY); return DECKS.some((d) => d[0] === v) ? (v as string) : 'indigo' })
@@ -137,6 +138,9 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
     try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ }
   }, [link])
 
+  const afk = mySeat >= 0 && pub?.seats[mySeat]?.status === 'sitOut'
+  const toggleAfk = () => void api('sitOut', { code, out: !afk }).then((r) => { if (!r.ok) alert(r.error) })
+  const doLeave = () => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }) }
   const copyCode = async () => {
     try { await navigator.clipboard.writeText(code); setCodeCopied(true); setTimeout(() => setCodeCopied(false), 1500) } catch { /* ignore */ }
   }
@@ -154,23 +158,35 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const joined = mySeat >= 0
   const chip = 'rounded-lg bg-white/10 hover:bg-white/15 px-3 py-1.5 text-xs font-semibold'
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
-        <button className="glass px-3 py-1.5 font-mono tracking-widest hover:border-white/40" title="Click to copy the table code" onClick={copyCode}>{codeCopied ? 'Copied ✓' : code}</button>
-        <button className={chip} onClick={copy}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
-        <button className={chip} onClick={() => setThemes((v) => !v)}>🎨 Look</button>
-        {joined && <button className={chip} onClick={() => void api('sitOut', { code, out: pub.seats[mySeat]?.status !== 'sitOut' }).then((r) => { if (!r.ok) alert(r.error) })}>{pub.seats[mySeat]?.status === 'sitOut' ? "I'm back" : 'Go AFK'}</button>}
-        {joined && <button className={`${chip} !text-red-300`} onClick={() => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }) }}>Leave</button>}
-        {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
-        <span className="ml-auto flex items-center gap-2">
-          <span className="text-white/50">Blinds {pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
-          <button className={chip} onClick={() => setBoard((v) => !v)}>🏆 Leaderboard</button>
-          <button className={chip} onClick={toggleLog}>{logOpen ? 'Hide log' : 'Show log'}</button>
+    <div className="flex flex-col h-full min-h-0">
+      <div className="relative flex-none mb-1">
+      <div className="flex items-center gap-1.5 sm:gap-2 text-xs">
+        <button className="glass px-2.5 sm:px-3 py-1.5 font-mono tracking-widest hover:border-white/40" title="Click to copy the table code" onClick={copyCode}>{codeCopied ? 'Copied ✓' : code}</button>
+        <button className={chip} onClick={() => setThemes((v) => !v)} aria-label="Look">🎨<span className="hidden sm:inline"> Look</span></button>
+        <span className="hidden sm:contents">
+          <button className={chip} onClick={copy}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
+          {joined && <button className={chip} onClick={toggleAfk}>{afk ? "I'm back" : 'Go AFK'}</button>}
+          {joined && <button className={`${chip} !text-red-300`} onClick={doLeave}>Leave</button>}
+          {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
+        </span>
+        <span className="ml-auto flex items-center gap-1.5 sm:gap-2">
+          <span className="text-white/50 num">{pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
+          <button className={chip} onClick={() => setBoard((v) => !v)} aria-label="Leaderboard">🏆<span className="hidden sm:inline"> Leaderboard</span></button>
+          <button className={chip} onClick={toggleLog} aria-label="Log">📜<span className="hidden sm:inline"> {logOpen ? 'Hide log' : 'Show log'}</span></button>
+          <button className={`${chip} sm:!hidden`} onClick={() => setMenu((v) => !v)} aria-label="Menu">⋯</button>
         </span>
       </div>
+      {menu && (
+        <div className="glass absolute right-0 top-full mt-2 z-40 p-2 flex flex-col gap-1.5 w-56 sm:hidden" style={{ background: 'rgba(16,20,32,.97)' }}>
+          <button className={chip} onClick={() => { void copy(); setMenu(false) }}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
+          {joined && <button className={chip} onClick={() => { toggleAfk(); setMenu(false) }}>{afk ? "I'm back" : 'Go AFK'}</button>}
+          {isOwner && <button className={chip} onClick={() => { setSettings(true); setMenu(false) }}>⚙ Settings</button>}
+          {joined && <button className={`${chip} !text-red-300`} onClick={() => { setMenu(false); doLeave() }}>Leave table</button>}
+        </div>
+      )}
 
       {themes && (
-        <div className="glass px-3 py-2 mb-2 flex items-center gap-3 flex-wrap text-xs">
+        <div className="glass absolute left-0 right-0 top-full mt-2 z-40 px-3 py-2 flex items-center gap-3 flex-wrap text-xs" style={{ background: 'rgba(16,20,32,.97)' }}>
           <span className="text-white/60">Table</span>
           {TABLE_THEMES.map(([id, label, bg]) => (
             <button key={id} title={label} aria-label={label} className={`swatch ${tableTheme === id ? 'on' : ''}`} style={{ background: bg }}
@@ -194,12 +210,13 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           </button>
         </div>
       )}
-      <div className="lg:flex lg:items-start lg:gap-4">
-        <div className="flex-1 min-w-0">
+      </div>
+      <div className="flex-1 min-h-0 lg:flex lg:gap-4">
+        <div className="flex-1 min-w-0 h-full min-h-0">
           <TableView code={code} uid={uid} live={live} mySeat={mySeat} tableTheme={tableTheme} deckStyle={deckStyle} fourColour={fourColour} onPickSeat={(s) => { setWantSeat(s); setShowJoin(true) }} />
         </div>
         {(board || logOpen) && (
-          <div className="lg:w-80 lg:shrink-0 mt-3 lg:mt-14 space-y-3 lg:sticky lg:top-3">
+          <div className="fixed inset-x-3 top-28 z-30 max-h-[45dvh] overflow-y-auto space-y-3 lg:static lg:inset-auto lg:z-auto lg:w-80 lg:shrink-0 lg:mt-12 lg:max-h-full">
             {board && <Leaderboard pub={pub} uid={uid} isOwner={isOwner} code={code} onClose={() => setBoard(false)} />}
             {logOpen && (
               <aside className="glass p-3 text-xs font-mono text-white/70 max-h-64 overflow-y-auto" aria-live="polite">
@@ -212,7 +229,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
       </div>
 
       {!joined && (
-        <div className="text-center mt-3">
+        <div className="text-center py-2 flex-none">
           <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
         </div>
       )}
@@ -261,30 +278,40 @@ function JoinCard({ code, seat, full, onClose }: { code: string; seat?: number; 
 
 function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engine/table.ts').PublicTable; uid: string; isOwner: boolean; code: string; onClose: () => void }) {
   const paid = (pub.settings.buyInCents ?? 0) > 0
+  const sign = (n: number) => (n > 0 ? '+' : '')
+  const tone = (n: number) => (n > 0 ? 'text-emerald-300' : n < 0 ? 'text-rose-300' : 'text-white/60')
   return (
     <aside className="glass p-4 max-h-[60vh] overflow-y-auto">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <h2 className="text-lg font-bold">🏆 Leaderboard</h2>
-        <button className="text-white/60" onClick={onClose}>✕</button>
+        <button className="text-white/60 px-1" onClick={onClose} aria-label="Close">✕</button>
       </div>
-      <div className={`grid ${paid ? 'grid-cols-[1fr_auto_auto_auto_auto]' : 'grid-cols-[1fr_auto_auto_auto]'} gap-x-3 gap-y-1.5 text-sm items-center`}>
-        <div className="text-xs text-white/50">Player</div><div className="text-xs text-white/50 text-right">Buy-ins</div><div className="text-xs text-white/50 text-right">Chips</div><div className="text-xs text-white/50 text-right">Net chips</div>{paid && <div className="text-xs text-white/50 text-right">Net $</div>}
-        {pub.leaderboard.map((r) => (
-          <div key={r.uid} className="contents">
-            <div className={`flex items-center gap-2 ${r.seated ? '' : 'opacity-50'}`}>
-              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: `hsl(${hue(r.uid)} 60% 50%)` }} />
-              <span className="truncate">{r.name}{r.uid === uid ? ' (you)' : ''}{!r.seated ? ' · left' : ''}</span>
-              {isOwner && r.seated && r.uid !== uid && <button className="text-[10px] text-red-300 underline" onClick={() => { if (confirm(`Remove ${r.name}?`)) void api('kick', { code, target: r.uid }) }}>remove</button>}
+      <div className="divide-y divide-white/5">
+        {pub.leaderboard.map((r, i) => (
+          <div key={r.uid} className={`flex items-center gap-2.5 py-2.5 ${r.seated ? '' : 'opacity-50'}`}>
+            <span className="w-4 text-center text-xs text-white/40 num">{i + 1}</span>
+            <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: `hsl(${hue(r.uid)} 60% 50%)` }} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-semibold text-sm" title={r.name}>{r.name}{r.uid === uid ? ' (you)' : ''}</div>
+              <div className="text-[11px] text-white/50 truncate">
+                {r.buyIns} buy-in{r.buyIns === 1 ? '' : 's'}{paid ? ` · ${money(r.paidCents)}` : ''}{!r.seated ? ' · left' : ''}
+              </div>
             </div>
-            <div className="text-right num font-bold">{r.buyIns}{paid && <span className="text-white/40 font-normal"> · {money(r.paidCents)}</span>}</div>
-            <div className="text-right num">{r.stack.toLocaleString()}</div>
-            <div className={`text-right num font-bold ${r.net > 0 ? 'text-emerald-300' : r.net < 0 ? 'text-rose-300' : ''}`}>{r.net > 0 ? '+' : ''}{r.net.toLocaleString()}</div>
-            {paid && <div className={`text-right num font-bold ${r.netCents > 0 ? 'text-emerald-300' : r.netCents < 0 ? 'text-rose-300' : ''}`}>{money(r.netCents, true) || '$0'}</div>}
+            <div className="text-right shrink-0">
+              <div className="num font-bold text-sm">{r.stack.toLocaleString()}</div>
+              <div className={`num text-[11px] font-semibold ${tone(r.net)}`}>
+                {sign(r.net)}{r.net.toLocaleString()}{paid ? ` · ${money(r.netCents, true) || '$0'}` : ''}
+              </div>
+            </div>
+            {isOwner && r.seated && r.uid !== uid && (
+              <button className="text-white/40 hover:text-red-300 px-1 shrink-0" title={`Remove ${r.name}`} aria-label={`Remove ${r.name}`}
+                onClick={() => { if (confirm(`Remove ${r.name}?`)) void api('kick', { code, target: r.uid }) }}>✕</button>
+            )}
           </div>
         ))}
       </div>
       {!pub.leaderboard.length && <div className="text-white/50 text-sm">No players yet.</div>}
-      <p className="text-[11px] text-white/40 mt-3">Net = what you hold now (chips on the table plus chips cashed out) minus what you bought in. Money is valued at this table's price per chip.</p>
+      <p className="text-[11px] text-white/40 mt-3">Net = chips you hold now, plus chips cashed out, minus what you bought in.</p>
     </aside>
   )
 }

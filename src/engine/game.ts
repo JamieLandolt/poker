@@ -285,7 +285,7 @@ function dealStreet(state: GameState): GameState {
   const n = street === 'flop' ? 3 : 1
   const dealt = Array.from({ length: n }, () => deck.pop()!)
   const board = [...state.board, ...dealt]
-  const players = state.players.map((p) => ({ ...p, bet: 0, acted: false, actedAtBet: -1 }))
+  const players = state.players.map((p) => ({ ...p, bet: 0, acted: false, actedAtBet: -1, lastAction: p.folded || p.allIn ? p.lastAction : '' }))
   return {
     ...state,
     players,

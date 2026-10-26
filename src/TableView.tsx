@@ -73,17 +73,17 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   // ----- geometry -----
   const small = w < 560
   const cx = w / 2, cy = h / 2
-  const rx = w * (small ? 0.4 : 0.42), ry = h * (small ? 0.38 : 0.34)
+  const rx = Math.min(w * 0.42, (w - (small ? 96 : 128)) / 2 - 4), ry = h * (small ? 0.36 : 0.34)
   // Seats have fixed places around the table, so you sit exactly where you clicked "Sit".
   const pos = (seat: number) => {
     const th = (Math.PI / 180) * (90 + seat * (360 / MAX_SEATS))
     return { x: cx + rx * Math.cos(th), y: cy + ry * Math.sin(th) }
   }
   const deck = { x: cx - (small ? 0.2 : 0.2) * w, y: cy - 0.02 * h }
-  const cw = small ? 30 : 40
-  const heroCw = small ? 44 : 56
-  const boardCw = small ? 38 : 52
-  const sw = small ? 96 : 128
+  const cw = small ? 26 : 40
+  const heroCw = small ? 40 : 56
+  const boardCw = small ? 32 : 52
+  const sw = small ? 80 : 128
 
   // ----- dealing order -----
   const inHand = pub.seats.filter((s): s is PublicSeat => !!s && s.inHand)
@@ -153,8 +153,8 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   const seatsView = useMemo(() => pub.seats, [pub.seats])
 
   return (
-    <div className="flex flex-col gap-3">
-      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full select-none mt-14" style={{ aspectRatio: small ? '3 / 4.1' : '16 / 9.5', maxHeight: '76vh' }}>
+    <div className="flex flex-col gap-2 h-full min-h-0">
+      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full flex-1 min-h-0 select-none mt-14">
         <div className="rail" />
         <div className="felt" />
 
@@ -240,17 +240,16 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                       </svg>
                     )}
                   </div>
-                  <div className="flex items-center justify-center gap-1 text-[13px] font-semibold leading-tight">
-                    <span className="truncate max-w-[84px]">{s.name}</span>
+                  <div className="flex items-center justify-center gap-1 text-[11px] sm:text-[13px] font-semibold leading-tight">
+                    <span className="truncate max-w-[60px] sm:max-w-[84px]" title={s.name}>{s.name}</span>
                     {s.leaving && <span className="pill">leaving</span>}
-                    {s.status === 'sitOut' && <span className="pill !bg-white/20 font-bold">AFK</span>}
                   </div>
-                  <div className="num text-[12px] text-amber-200 font-bold">{s.status === 'busted' ? 'busted' : s.stack.toLocaleString()}</div>
-                  <div className="h-4 text-[11px] text-white/60 truncate">
-                    {isTurn ? (isMe ? 'your move' : 'thinking…') : s.status === 'sitOut' ? `missed ${s.afkMissed ?? 0} hand${s.afkMissed === 1 ? '' : 's'}` : pub.phase === 'betting' ? s.lastAction : ''}
-                    {winners.has(s.seat) && pub.result && <span className="text-emerald-300 font-bold"> +{won(s.seat).toLocaleString()}</span>}
-                  </div>
+                  <div className="num text-[11px] sm:text-[12px] text-amber-200 font-bold">{s.status === 'busted' ? 'busted' : s.stack.toLocaleString()}</div>
+                  {winners.has(s.seat) && pub.result && (
+                    <div className="text-[11px] text-emerald-300 font-bold num">+{won(s.seat).toLocaleString()}</div>
+                  )}
                   <div className="absolute -top-2 -right-2 flex flex-col gap-0.5">
+                    {s.status === 'sitOut' && <span className="badge b-afk">AFK</span>}
                     {pub.button === s.seat && pub.phase !== 'waiting' && <span className="badge b-d" title="Dealer">D</span>}
                     {pub.sbSeat === s.seat && pub.phase !== 'waiting' && <span className="badge b-sb" title="Small blind">SB</span>}
                     {pub.bbSeat === s.seat && pub.phase !== 'waiting' && <span className="badge b-bb" title="Big blind">BB</span>}
@@ -260,6 +259,11 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
               {s.bet > 0 && pub.phase === 'betting' && (
                 <div className="absolute" style={{ left: betSpot.x, top: betSpot.y, transform: 'translate(-50%, -50%)' }} key={`bet-${pub.handId}-${s.seat}-${s.bet}`}>
                   <Chips amount={s.bet} bigBlind={pub.settings.bigBlind} fly={{ dx: p.x - betSpot.x, dy: p.y - betSpot.y, delay: animating && pub.street === 'preflop' ? dealTotal : 0 }} />
+                </div>
+              )}
+              {s.bet === 0 && pub.phase === 'betting' && s.lastAction === 'checks' && (
+                <div className="absolute" style={{ left: betSpot.x, top: betSpot.y, transform: 'translate(-50%, -50%)' }} key={`chk-${pub.handId}-${pub.street}-${s.seat}`}>
+                  <span className="check-pill">CHECK</span>
                 </div>
               )}
               {winners.has(s.seat) && pub.phase === 'handOver' && (
@@ -274,7 +278,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
       </div>
 
       {/* actions */}
-      <div className="min-h-[88px]">
+      <div className="flex-none min-h-[72px]">
         {myPub && myTurn && pub.legal ? (
           <ActionBar key={`${pub.handId}-${pub.seq}`} pub={pub} myStack={myPub.stack} busy={busy} onAct={act} />
         ) : myPub && myPub.stack === 0 && !(myPub.inHand && !myPub.folded && pub.phase === 'betting') ? (
@@ -320,19 +324,18 @@ function ActionBar({ pub, myStack, busy, onAct }: { pub: PublicTable; myStack: n
   const preset = 'rounded-lg bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs font-semibold'
   const slider = Math.min(lg.maxRaiseTo, Math.max(lg.minRaiseTo, isInt ? parsed : lg.minRaiseTo))
   return (
-    <div className="space-y-2">
+    <div className="relative space-y-2">
       <div className="flex gap-2 justify-center flex-wrap">
-        <button className={`${btn} ${lg.canCheck ? 'bg-sky-600' : 'bg-rose-600'}`} disabled={busy} onClick={() => onAct(lg.canCheck ? 'check' : 'fold')}>{lg.canCheck ? 'Check' : 'Fold'}</button>
+        <button className={`${btn} bg-rose-600`} disabled={busy} onClick={() => onAct('fold')}>Fold</button>
         {lg.canCheck
-          ? null
+          ? <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => onAct('check')}>Check</button>
           : <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => onAct('call')}>Call {lg.callAmount.toLocaleString()}{lg.callAmount >= myStack ? ' (all-in)' : ''}</button>}
         {lg.canRaise
           ? <button className={`${btn} ${raising ? 'bg-amber-300' : 'bg-amber-500'} text-black`} disabled={busy} onClick={() => setRaising((v) => !v)}>{raising ? 'Cancel' : verb}</button>
           : lg.canAllIn && !lg.canCheck && lg.callAmount < myStack ? <button className={`${btn} bg-violet-600`} disabled={busy} onClick={() => onAct('allin')}>All-in</button> : null}
       </div>
-      {lg.canCheck && <div className="text-center text-xs text-white/40">Fold is only offered when there is a bet to call.</div>}
       {raising && lg.canRaise && (
-        <div className="glass p-3 space-y-2 max-w-md mx-auto">
+        <div className="glass p-3 space-y-2 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-[min(92vw,28rem)] z-20" style={{ background: 'rgba(16,20,32,.97)' }}>
           <div className="flex flex-wrap gap-1.5 justify-center">
             {([['¼ pot', 0.25], ['½ pot', 0.5], ['¾ pot', 0.75], ['Pot', 1]] as const).map(([l, f]) => (
               <button key={l} className={preset} onClick={() => potRaise(f)}>{l}</button>
@@ -349,9 +352,11 @@ function ActionBar({ pub, myStack, busy, onAct }: { pub: PublicTable; myStack: n
               {allIn ? 'All-in' : `${verb} to`} {valid ? parsed.toLocaleString() : ''}
             </button>
           </div>
-          <div className={`text-center text-[11px] ${tooSmall || tooBig || !isInt ? 'text-rose-300' : 'text-white/40'}`}>
-            {!isInt ? 'Enter a whole number.' : tooSmall ? `Minimum ${verb.toLowerCase()} is to ${lg.minRaiseTo.toLocaleString()}.` : tooBig ? `You only have ${lg.maxRaiseTo.toLocaleString()} to put in.` : `Min ${lg.minRaiseTo.toLocaleString()} · Max ${lg.maxRaiseTo.toLocaleString()} (all-in)`}
-          </div>
+          {(!isInt || tooSmall || tooBig) && (
+            <div className="text-center text-[11px] text-rose-300">
+              {!isInt ? 'Enter a whole number.' : tooSmall ? `Minimum is ${lg.minRaiseTo.toLocaleString()}.` : `Maximum is ${lg.maxRaiseTo.toLocaleString()}.`}
+            </div>
+          )}
         </div>
       )}
     </div>

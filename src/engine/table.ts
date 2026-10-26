@@ -20,7 +20,7 @@ export interface TableSettings {
   buyInCents: number
   turnSecs: number
 }
-export const DEFAULT_TABLE_SETTINGS: TableSettings = { smallBlind: 10, bigBlind: 20, startStack: 2000, buyInCents: 0, turnSecs: 20 }
+export const DEFAULT_TABLE_SETTINGS: TableSettings = { smallBlind: 10, bigBlind: 20, startStack: 2000, buyInCents: 0, turnSecs: 40 }
 
 export type SeatStatus = 'active' | 'sitOut' | 'busted'
 
@@ -116,6 +116,9 @@ function contesting(t: Table, uid: string): boolean {
 /** Fill in fields that older stored tables do not have yet. Safe to call on every load. */
 export function migrate(t: Table): Table {
   t.settings.buyInCents ??= 0
+  // existing tables pick up the longer default turn clock
+  t.settings.turnSecs = Math.max(t.settings.turnSecs ?? 0, DEFAULT_TABLE_SETTINGS.turnSecs)
+  if (t.pendingSettings) t.pendingSettings.turnSecs = Math.max(t.pendingSettings.turnSecs ?? 0, DEFAULT_TABLE_SETTINGS.turnSecs)
   if (t.pendingSettings) t.pendingSettings.buyInCents ??= 0
   t.actorUid ??= null
   for (const s of t.seats) {
