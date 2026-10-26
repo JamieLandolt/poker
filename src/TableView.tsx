@@ -295,7 +295,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           </div>
         ) : (
           <div className="text-center text-sm text-white/60 pt-4">
-            {myPub ? (pub.phase === 'betting' ? (myPub.inHand ? (myPub.folded ? 'You folded. Waiting for the hand to finish.' : 'Waiting for your turn…') : 'You will be dealt in next hand.') : '') : 'Pick a seat to play.'}
+            {myPub ? '' : 'Pick a seat to play.'}
             {myNet > 0 && <div className="text-emerald-300 font-bold">You won {myNet.toLocaleString()}</div>}
           </div>
         )}
