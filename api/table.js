@@ -193994,6 +193994,11 @@ function buildPots(input) {
     }
     prev = level;
   }
+  if (pots.length === 0) {
+    const remaining = players.reduce((a, p) => a + p.total, 0);
+    const live2 = players.filter((p) => !p.folded).map((p) => p.id);
+    if (remaining > 0 && live2.length) return { refund, pots: [{ amount: remaining, eligible: live2 }] };
+  }
   let leftover = 0;
   for (const p of players) leftover += Math.max(0, p.total - prev);
   if (leftover > 0 && pots.length) pots[pots.length - 1].amount += leftover;
@@ -194270,8 +194275,6 @@ var GRACE_MS = 1e3;
 var AWAY_SIT_OUT_MS = 45e3;
 var NEXT_HAND_MS = 6e3;
 var NEXT_HAND_FOLD_MS = 3500;
-var AFK_MAX_HANDS = 10;
-var SITOUT_MAX_MS = 30 * 6e4;
 var BUSTED_MAX_MS = 5 * 6e4;
 var DEFAULT_TABLE_SETTINGS = { smallBlind: 10, bigBlind: 20, startStack: 2e3, buyInCents: 0, turnSecs: 20 };
 var TableError = class extends Error {
@@ -194564,7 +194567,6 @@ function startNextHand(t2, deck, now) {
     const s2 = t2.seats[i2];
     if (s2 && s2.status === "sitOut") {
       s2.afkHands++;
-      if (s2.afkHands > AFK_MAX_HANDS && !seats.includes(i2)) cashOutAndFree(t2, i2);
     }
   }
   t2.handCount++;
@@ -194590,8 +194592,7 @@ function tick(t2, now, deckFn) {
     if (!s2) continue;
     const away = now - s2.lastSeen;
     if (away > AWAY_SIT_OUT_MS && s2.status === "active") setSitOut(t2, s2.uid, true, now);
-    if (s2.status === "sitOut" && s2.idleSince !== null && now - s2.idleSince > SITOUT_MAX_MS && !contesting(t2, s2.uid)) leave(t2, s2.uid, now);
-    else if (s2.status === "busted" && s2.idleSince !== null && now - s2.idleSince > BUSTED_MAX_MS && !contesting(t2, s2.uid)) leave(t2, s2.uid, now);
+    if (s2.status === "busted" && s2.idleSince !== null && now - s2.idleSince > BUSTED_MAX_MS && !contesting(t2, s2.uid)) leave(t2, s2.uid, now);
   }
   if (t2.phase === "betting" && t2.hand && t2.deadline !== null && now > t2.deadline + GRACE_MS) {
     const h2 = t2.hand;
@@ -194650,7 +194651,7 @@ function publicView(t2, now) {
       stack: s2.stack,
       status: s2.status,
       leaving: s2.leaving,
-      afkLeft: s2.status === "sitOut" ? Math.max(0, AFK_MAX_HANDS - (s2.afkHands ?? 0)) : null,
+      afkMissed: s2.status === "sitOut" ? s2.afkHands ?? 0 : null,
       inHand: !!hp,
       folded: !!hp?.folded,
       allIn: !!hp?.allIn,

@@ -3,6 +3,7 @@ import { MAX_SEATS, GRACE_MS, type PublicSeat, type PublicTable } from './engine
 import type { Card } from './engine/cards.ts'
 import { api, type Live } from './net.ts'
 import { Chips, PlayingCard, Slot } from './Cards.tsx'
+import PotDisplay from './PotDisplay.tsx'
 import { hue, money } from './hue.ts'
 
 const DEAL_STEP = 110
@@ -33,12 +34,12 @@ interface Props {
   live: Live
   mySeat: number
   onPickSeat: (seat: number) => void
-  logOpen: boolean
   tableTheme: string
-  chipStyle: string
+  deckStyle: string
+  fourColour: boolean
 }
 
-export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen, tableTheme, chipStyle }: Props) {
+export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTheme, deckStyle, fourColour }: Props) {
   const pub = live.pub as PublicTable
   const { ref, w, h } = useSize()
   const now = useNow(250)
@@ -153,14 +154,13 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen
 
   return (
     <div className="flex flex-col gap-3">
-      <div ref={ref} data-table={tableTheme} data-chips={chipStyle} className="relative w-full select-none mt-14" style={{ aspectRatio: small ? '3 / 4.1' : '16 / 9.5', maxHeight: '76vh' }}>
+      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full select-none mt-14" style={{ aspectRatio: small ? '3 / 4.1' : '16 / 9.5', maxHeight: '76vh' }}>
         <div className="rail" />
         <div className="felt" />
 
         {/* centre: pot, deck, board */}
-        <div className="absolute text-center" style={{ left: potSpot.x, top: potSpot.y, transform: 'translate(-50%, -50%)' }}>
-          <div className="text-[11px] uppercase tracking-widest text-white/50">Pot</div>
-          <div className="num text-xl font-extrabold text-amber-200">{pub.pot.toLocaleString()}</div>
+        <div className="absolute" style={{ left: potSpot.x, top: potSpot.y, transform: 'translate(-50%, -50%)' }}>
+          <PotDisplay amount={pub.pot} />
         </div>
         <div className="absolute" style={{ left: deck.x, top: deck.y, transform: 'translate(-50%, -50%)' }}>
           {[2, 1, 0].map((i) => <div key={i} className="absolute" style={{ left: -boardCw / 2 + i * 1.5, top: -boardCw * 0.7 - i * 1.5 }}><PlayingCard faceUp={false} width={boardCw} /></div>)}
@@ -259,12 +259,12 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen
               </div>
               {s.bet > 0 && pub.phase === 'betting' && (
                 <div className="absolute" style={{ left: betSpot.x, top: betSpot.y, transform: 'translate(-50%, -50%)' }} key={`bet-${pub.handId}-${s.seat}-${s.bet}`}>
-                  <Chips amount={s.bet} fly={{ dx: p.x - betSpot.x, dy: p.y - betSpot.y, delay: animating && pub.street === 'preflop' ? dealTotal : 0 }} />
+                  <Chips amount={s.bet} bigBlind={pub.settings.bigBlind} fly={{ dx: p.x - betSpot.x, dy: p.y - betSpot.y, delay: animating && pub.street === 'preflop' ? dealTotal : 0 }} />
                 </div>
               )}
               {winners.has(s.seat) && pub.phase === 'handOver' && (
                 <div className="absolute" style={{ left: p.x, top: p.y - 10, transform: 'translate(-50%, -50%)', zIndex: 5 }} key={`win-${pub.handId}-${s.seat}`}>
-                  <Chips amount={won(s.seat)} fly={{ dx: cx - p.x, dy: cy - p.y, delay: 200 }} />
+                  <Chips amount={won(s.seat)} bigBlind={pub.settings.bigBlind} fly={{ dx: cx - p.x, dy: cy - p.y, delay: 200 }} />
                   <div className="float-win num text-emerald-300 font-extrabold text-lg text-center">+{won(s.seat).toLocaleString()}</div>
                 </div>
               )}
@@ -298,11 +298,6 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen
         {msg && <div className="text-center text-xs text-red-300 mt-1">{msg}</div>}
       </div>
 
-      {logOpen && (
-        <div className="glass p-3 text-xs font-mono text-white/70 max-h-40 overflow-y-auto" aria-live="polite">
-          {pub.log.length ? pub.log.map((l, i) => <div key={i}>{l}</div>) : 'No hands yet.'}
-        </div>
-      )}
     </div>
   )
 }

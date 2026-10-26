@@ -6,15 +6,17 @@ import { hue, money } from './hue.ts'
 const NAME_KEY = 'poker:name'
 const LOG_KEY = 'poker:log'
 const THEME_KEY = 'poker:table'
-const CHIP_KEY = 'poker:chips'
-const CHIP_STYLES: [string, string][] = [['tower', 'Stacks'], ['classic', 'Casino'], ['flat', 'Flat'], ['plaque', 'Plaques'], ['gold', 'Gold'], ['neon', 'Neon']]
+const DECK_KEY = 'poker:deck'
+const FACES_KEY = 'poker:faces'
+const DECKS: [string, string][] = [['indigo', 'Indigo'], ['crimson', 'Crimson'], ['emerald', 'Emerald'], ['gold', 'Gold'], ['midnight', 'Midnight']]
 const TABLE_THEMES: [string, string, string][] = [
-  ['classic', 'Lime green', 'linear-gradient(135deg,#86b02a,#2f4d0d)'],
-  ['midnight', 'Midnight blue', 'linear-gradient(135deg,#21468f,#0a1838)'],
-  ['crimson', 'Crimson velvet', 'linear-gradient(135deg,#9a2233,#3a0911)'],
-  ['noir', 'Noir & gold', 'linear-gradient(135deg,#f5d37a,#2c2c33)'],
-  ['neon', 'Neon', 'linear-gradient(135deg,#22d3ee,#facc15)'],
-  ['violet', 'Violet', 'linear-gradient(135deg,#5d2b8f,#1f0b38)'],
+  // [id, label, preview = felt colours inside, rail colours as the ring]
+  ['classic', 'Lime green', 'radial-gradient(circle at 40% 35%,#86b02a,#2f4d0d 90%) padding-box, linear-gradient(145deg,#2b2f3d,#12141c) border-box'],
+  ['midnight', 'Midnight blue', 'radial-gradient(circle at 40% 35%,#21468f,#0a1838 90%) padding-box, linear-gradient(145deg,#b9c4dd,#4a5878 55%,#232b40) border-box'],
+  ['crimson', 'Crimson velvet', 'radial-gradient(circle at 40% 35%,#9a2233,#3a0911 90%) padding-box, linear-gradient(145deg,#6b3d1d,#2c1608 60%,#170b04) border-box'],
+  ['noir', 'Noir & gold', 'radial-gradient(circle at 40% 35%,#2c2c33,#0a0a0d 90%) padding-box, linear-gradient(145deg,#f5d37a,#b8892b 55%,#6e4f12) border-box'],
+  ['neon', 'Neon', 'radial-gradient(circle at 40% 35%,#0b3347,#04121c 90%) padding-box, linear-gradient(120deg,#22d3ee,#5eead4 45%,#facc15) border-box'],
+  ['violet', 'Violet', 'radial-gradient(circle at 40% 35%,#5d2b8f,#1f0b38 90%) padding-box, linear-gradient(145deg,#3a3550,#17141f) border-box'],
 ]
 const lsGet = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
 const lsSet = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* ignore */ } }
@@ -118,8 +120,10 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const [board, setBoard] = useState(false)
   const [settings, setSettings] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [codeCopied, setCodeCopied] = useState(false)
   const [tableTheme, setTableTheme] = useState(() => { const v = lsGet(THEME_KEY); return TABLE_THEMES.some((t) => t[0] === v) ? (v as string) : 'classic' })
-  const [chipStyle, setChipStyle] = useState(() => { const v = lsGet(CHIP_KEY); return CHIP_STYLES.some((c) => c[0] === v) ? (v as string) : 'tower' })
+  const [deckStyle, setDeckStyle] = useState(() => { const v = lsGet(DECK_KEY); return DECKS.some((d) => d[0] === v) ? (v as string) : 'indigo' })
+  const [fourColour, setFourColour] = useState(() => lsGet(FACES_KEY) === '1')
   const [themes, setThemes] = useState(false)
 
   useEffect(() => subscribeTable(code, uid, (p) => setLive((l) => ({ ...l, ...p }))), [code, uid])
@@ -132,6 +136,10 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const copy = useCallback(async () => {
     try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ }
   }, [link])
+
+  const copyCode = async () => {
+    try { await navigator.clipboard.writeText(code); setCodeCopied(true); setTimeout(() => setCodeCopied(false), 1500) } catch { /* ignore */ }
+  }
 
   if (live.status === 'missing') return (
     <div className="glass p-6 max-w-sm mx-auto text-center space-y-3 mt-10">
@@ -148,15 +156,17 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
-        <span className="glass px-3 py-1.5 font-mono tracking-widest">{code}</span>
+        <button className="glass px-3 py-1.5 font-mono tracking-widest hover:border-white/40" title="Click to copy the table code" onClick={copyCode}>{codeCopied ? 'Copied ✓' : code}</button>
         <button className={chip} onClick={copy}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
-        <button className={chip} onClick={() => setBoard((v) => !v)}>🏆 Leaderboard</button>
-        <button className={chip} onClick={toggleLog}>{logOpen ? 'Hide log' : 'Show log'}</button>
         <button className={chip} onClick={() => setThemes((v) => !v)}>🎨 Look</button>
-        <span className="text-white/50 ml-auto">Blinds {pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
         {joined && <button className={chip} onClick={() => void api('sitOut', { code, out: pub.seats[mySeat]?.status !== 'sitOut' }).then((r) => { if (!r.ok) alert(r.error) })}>{pub.seats[mySeat]?.status === 'sitOut' ? "I'm back" : 'Go AFK'}</button>}
         {joined && <button className={`${chip} !text-red-300`} onClick={() => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }) }}>Leave</button>}
         {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
+        <span className="ml-auto flex items-center gap-2">
+          <span className="text-white/50">Blinds {pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
+          <button className={chip} onClick={() => setBoard((v) => !v)}>🏆 Leaderboard</button>
+          <button className={chip} onClick={toggleLog}>{logOpen ? 'Hide log' : 'Show log'}</button>
+        </span>
       </div>
 
       {themes && (
@@ -167,18 +177,38 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
               onClick={() => { setTableTheme(id); lsSet(THEME_KEY, id) }} />
           ))}
           <span className="text-white/50">{TABLE_THEMES.find((t) => t[0] === tableTheme)?.[1]}</span>
-          <span className="text-white/60 ml-3">Chips</span>
-          {CHIP_STYLES.map(([id, label]) => (
-            <button key={id} className={`rounded-lg px-2.5 py-1 font-semibold ${chipStyle === id ? 'bg-white text-black' : 'bg-white/10'}`}
-              onClick={() => { setChipStyle(id); lsSet(CHIP_KEY, id) }}>{label}</button>
+          <span className="text-white/60 ml-3">Deck</span>
+          {DECKS.map(([id, label]) => (
+            <button key={id} title={label} aria-label={`${label} deck`}
+              className={`rounded-xl px-2.5 py-2 flex flex-col items-center gap-1.5 font-semibold ${deckStyle === id ? 'bg-white/20 ring-2 ring-white' : 'bg-white/10 hover:bg-white/15'}`}
+              onClick={() => { setDeckStyle(id); lsSet(DECK_KEY, id) }}>
+              <span data-deck={id} className="block" style={{ width: 28, height: 40 }}>
+                <span className="pc-back block" style={{ position: 'static', width: '100%', height: '100%', transform: 'none', borderRadius: 5 }} />
+              </span>
+              <span>{label}</span>
+            </button>
           ))}
+          <button className={`rounded-lg px-3 py-1.5 font-semibold ${fourColour ? 'bg-white text-black' : 'bg-white/10'}`}
+            onClick={() => { setFourColour((v) => { lsSet(FACES_KEY, v ? '0' : '1'); return !v }) }}>
+            Four-colour faces
+          </button>
         </div>
       )}
       <div className="lg:flex lg:items-start lg:gap-4">
         <div className="flex-1 min-w-0">
-          <TableView code={code} uid={uid} live={live} mySeat={mySeat} logOpen={logOpen} tableTheme={tableTheme} chipStyle={chipStyle} onPickSeat={(s) => { setWantSeat(s); setShowJoin(true) }} />
+          <TableView code={code} uid={uid} live={live} mySeat={mySeat} tableTheme={tableTheme} deckStyle={deckStyle} fourColour={fourColour} onPickSeat={(s) => { setWantSeat(s); setShowJoin(true) }} />
         </div>
-        {board && <Leaderboard pub={pub} uid={uid} isOwner={isOwner} code={code} onClose={() => setBoard(false)} />}
+        {(board || logOpen) && (
+          <div className="lg:w-80 lg:shrink-0 mt-3 lg:mt-14 space-y-3 lg:sticky lg:top-3">
+            {board && <Leaderboard pub={pub} uid={uid} isOwner={isOwner} code={code} onClose={() => setBoard(false)} />}
+            {logOpen && (
+              <aside className="glass p-3 text-xs font-mono text-white/70 max-h-64 overflow-y-auto" aria-live="polite">
+                <div className="text-[11px] font-sans font-bold text-white/50 mb-1.5">Hand log</div>
+                {pub.log.length ? pub.log.map((l, i) => <div key={i}>{l}</div>) : 'No hands yet.'}
+              </aside>
+            )}
+          </div>
+        )}
       </div>
 
       {!joined && (
@@ -232,7 +262,7 @@ function JoinCard({ code, seat, full, onClose }: { code: string; seat?: number; 
 function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engine/table.ts').PublicTable; uid: string; isOwner: boolean; code: string; onClose: () => void }) {
   const paid = (pub.settings.buyInCents ?? 0) > 0
   return (
-    <aside className="glass p-4 mt-3 lg:mt-14 lg:w-80 lg:shrink-0 lg:sticky lg:top-3 max-h-[85vh] overflow-y-auto">
+    <aside className="glass p-4 max-h-[60vh] overflow-y-auto">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-bold">🏆 Leaderboard</h2>
         <button className="text-white/60" onClick={onClose}>✕</button>
