@@ -140,6 +140,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
 
   const afk = mySeat >= 0 && pub?.seats[mySeat]?.status === 'sitOut'
   const toggleAfk = () => void api('sitOut', { code, out: !afk }).then((r) => { if (!r.ok) alert(r.error) })
+  const togglePause = () => void api('pause', { code, on: !pub?.paused })
   const doLeave = () => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }) }
   const copyCode = async () => {
     try { await navigator.clipboard.writeText(code); setCodeCopied(true); setTimeout(() => setCodeCopied(false), 1500) } catch { /* ignore */ }
@@ -168,6 +169,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           {joined && <button className={chip} onClick={toggleAfk}>{afk ? "I'm back" : 'Go AFK'}</button>}
           {joined && <button className={`${chip} !text-red-300`} onClick={doLeave}>Leave</button>}
           {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
+          {isOwner && <button className={chip} onClick={togglePause}>{pub.paused ? '▶ Resume' : '⏸ Pause'}</button>}
         </span>
         <span className="ml-auto flex items-center gap-1.5 sm:gap-2">
           <span className="text-white/50 num">{pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
@@ -181,6 +183,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           <button className={chip} onClick={() => { void copy(); setMenu(false) }}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
           {joined && <button className={chip} onClick={() => { toggleAfk(); setMenu(false) }}>{afk ? "I'm back" : 'Go AFK'}</button>}
           {isOwner && <button className={chip} onClick={() => { setSettings(true); setMenu(false) }}>⚙ Settings</button>}
+          {isOwner && <button className={chip} onClick={() => { togglePause(); setMenu(false) }}>{pub.paused ? '▶ Resume timers' : '⏸ Pause timers'}</button>}
           {joined && <button className={`${chip} !text-red-300`} onClick={() => { setMenu(false); doLeave() }}>Leave table</button>}
         </div>
       )}

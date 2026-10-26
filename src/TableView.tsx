@@ -96,7 +96,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   // ----- client side tick / ping loops -----
   const lastFire = useRef(0)
   useEffect(() => {
-    if (mySeat < 0) return
+    if (mySeat < 0 || pub.paused) return
     const myRank = pub.seats.slice(0, mySeat).filter(Boolean).length
     let due: number | null = null
     if (pub.phase === 'betting' && pub.deadline) {
@@ -108,7 +108,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
     const wait = Math.max(Math.max(0, due - (Date.now() + live.offset)), lastFire.current + 2500 - Date.now())
     const id = setTimeout(() => { lastFire.current = Date.now(); void api('tick', { code }) }, wait)
     return () => clearTimeout(id)
-  }, [pub.version, pub.phase, pub.deadline, pub.nextHandAt, pub.toAct, pub.eligible, mySeat, code, live.offset, pub.seats])
+  }, [pub.version, pub.paused, pub.phase, pub.deadline, pub.nextHandAt, pub.toAct, pub.eligible, mySeat, code, live.offset, pub.seats])
 
   useEffect(() => {
     if (mySeat < 0) return
@@ -185,7 +185,10 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
             ))}
           </div>
         )}
-        {pub.phase === 'waiting' && (
+        {pub.paused && (
+          <div className="absolute glass px-4 py-2 text-sm font-bold tracking-wide" style={{ left: cx, top: potSpot.y - 46, transform: 'translate(-50%, -50%)', zIndex: 8 }}>⏸ Paused</div>
+        )}
+        {pub.phase === 'waiting' && !pub.paused && (
           <div className="absolute glass px-3 py-1.5 text-sm text-white/80" style={{ left: cx, top: boardY + boardCw * 0.7 + 26, transform: 'translate(-50%, -50%)' }}>
             {pub.seats.filter(Boolean).length < 2 ? 'Waiting for another player…' : 'Dealing soon…'}
           </div>
@@ -216,8 +219,9 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           }
           const isTurn = pub.toAct === s.seat && pub.phase === 'betting'
           const dur = pub.settings.turnSecs
-          const remaining = pub.deadline ? Math.max(0, pub.deadline - serverNow) : 0
-          const cls = ['seat', s.status === 'sitOut' && 'afk', isTurn && 'turn', s.folded && s.inHand && 'folded', winners.has(s.seat) && 'won', isMe && 'me'].filter(Boolean).join(' ')
+          const clock = pub.paused && pub.pausedAt ? pub.pausedAt : serverNow
+          const remaining = pub.deadline ? Math.max(0, pub.deadline - clock) : 0
+          const cls = ['seat', pub.paused && 'paused', s.status === 'sitOut' && 'afk', isTurn && 'turn', s.folded && s.inHand && 'folded', winners.has(s.seat) && 'won', isMe && 'me'].filter(Boolean).join(' ')
           return (
             <div key={i}>
               <div className={cls} style={{ left: p.x, top: p.y, ['--sw' as string]: `${sw}px`, ['--dur' as string]: `${dur}s`, ['--delay' as string]: `-${Math.max(0, dur * 1000 - remaining) / 1000}s` }}>
@@ -230,11 +234,11 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                     })}
                   </div>
                 )}
-                <div className="plate" key={isTurn ? `t-${pub.handId}-${pub.seq}` : 'p'} style={{ position: 'relative', zIndex: 2, marginTop: showCards ? 0 : 26 }}>
+                <div className="plate" key={isTurn ? `t-${pub.handId}-${pub.seq}-${pub.paused}` : 'p'} style={{ position: 'relative', zIndex: 2, marginTop: showCards ? 0 : 26 }}>
                   <div className="avatar" style={{ background: `hsl(${hue(s.uid)} 60% 42%)` }}>
                     {s.name.slice(0, 1).toUpperCase()}
                     {isTurn && (
-                      <svg className="ring" viewBox="0 0 40 40" key={`${pub.handId}-${pub.seq}`}>
+                      <svg className="ring" viewBox="0 0 40 40" key={`${pub.handId}-${pub.seq}-${pub.paused}`}>
                         <circle className="bg" cx="20" cy="20" r="18" pathLength={100} />
                         <circle className="fg" cx="20" cy="20" r="18" pathLength={100} style={{ ['--dur' as string]: `${dur}s`, ['--delay' as string]: `-${Math.max(0, dur * 1000 - remaining) / 1000}s` }} />
                       </svg>
@@ -318,8 +322,12 @@ function ActionBar({ pub, myStack, busy, onAct }: { pub: PublicTable; myStack: n
   const tooSmall = isInt && parsed < lg.minRaiseTo
   const tooBig = isInt && parsed > lg.maxRaiseTo
   const valid = isInt && !tooSmall && !tooBig
+  const bb = Math.max(1, pub.settings.bigBlind)
   const setClamped = (v: number) => setAmount(String(Math.min(lg.maxRaiseTo, Math.max(lg.minRaiseTo, Math.round(v)))))
-  const potRaise = (f: number) => setClamped(pub.currentBet + f * (pub.pot + lg.callAmount))
+  // Presets land on whole big blinds (nobody wants to bet one extra chip); min and max stay exact.
+  const potRaise = (f: number) => setClamped(Math.round((pub.currentBet + f * (pub.pot + lg.callAmount)) / bb) * bb)
+  // The slider moves in big blinds and snaps to all-in when it gets within one step of the end.
+  const onSlide = (v: number) => setAmount(String(lg.maxRaiseTo - v < bb ? lg.maxRaiseTo : v))
   const btn = 'rounded-xl px-4 py-3 font-bold text-sm sm:text-base transition active:scale-95 disabled:opacity-40'
   const preset = 'rounded-lg bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs font-semibold'
   const slider = Math.min(lg.maxRaiseTo, Math.max(lg.minRaiseTo, isInt ? parsed : lg.minRaiseTo))
@@ -343,10 +351,10 @@ function ActionBar({ pub, myStack, busy, onAct }: { pub: PublicTable; myStack: n
             <button className={`${preset} !bg-violet-600/70`} onClick={() => setAmount(String(lg.maxRaiseTo))}>All-in</button>
           </div>
           {lg.minRaiseTo < lg.maxRaiseTo && (
-            <input type="range" className="w-full accent-amber-400" min={lg.minRaiseTo} max={lg.maxRaiseTo} value={slider} onChange={(e) => setAmount(e.target.value)} aria-label={`${verb} amount`} />
+            <input type="range" className="w-full accent-amber-400" min={lg.minRaiseTo} max={lg.maxRaiseTo} step={bb} value={slider} onChange={(e) => onSlide(Number(e.target.value))} aria-label={`${verb} amount`} />
           )}
           <div className="flex items-center gap-2 justify-center">
-            <input type="number" inputMode="numeric" className="w-32 rounded-lg bg-black/40 border border-white/20 px-3 py-2 num text-center font-bold" value={amount} min={lg.minRaiseTo} max={lg.maxRaiseTo}
+            <input type="number" inputMode="numeric" className="w-32 rounded-lg bg-black/40 border border-white/20 px-3 py-2 num text-center font-bold" value={amount} min={lg.minRaiseTo} max={lg.maxRaiseTo} step={bb}
               onChange={(e) => setAmount(e.target.value)} aria-label={`${verb} amount`} />
             <button className={`${btn} bg-gradient-to-r from-emerald-400 to-yellow-300 text-black`} disabled={busy || !valid} onClick={() => onAct(allIn ? 'allin' : 'raise', parsed)}>
               {allIn ? 'All-in' : `${verb} to`} {valid ? parsed.toLocaleString() : ''}

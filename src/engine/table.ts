@@ -72,6 +72,9 @@ export interface Table {
   deadline: number | null
   /** uid of the player the current deadline belongs to. */
   actorUid: string | null
+  /** Host pause: all clocks (turn timer, next hand, away detection) stand still. */
+  paused: boolean
+  pausedAt: number | null
   records: Record<string, PlayerRecord>
   version: number
 }
@@ -121,6 +124,8 @@ export function migrate(t: Table): Table {
   if (t.pendingSettings) t.pendingSettings.turnSecs = Math.max(t.pendingSettings.turnSecs ?? 0, DEFAULT_TABLE_SETTINGS.turnSecs)
   if (t.pendingSettings) t.pendingSettings.buyInCents ??= 0
   t.actorUid ??= null
+  t.paused ??= false
+  t.pausedAt ??= null
   for (const s of t.seats) {
     if (!s) continue
     s.afkHands ??= 0
@@ -138,7 +143,7 @@ export function createTable(code: string, ownerUid: string, settings: TableSetti
   void now
   return {
     code, ownerUid, settings, pendingSettings: null, seats: Array(MAX_SEATS).fill(null), button: -1,
-    handCount: 0, phase: 'waiting', hand: null, nextHandAt: null, deadline: null, actorUid: null, records: {}, version: 0,
+    handCount: 0, phase: 'waiting', hand: null, nextHandAt: null, deadline: null, actorUid: null, paused: false, pausedAt: null, records: {}, version: 0,
   }
 }
 
@@ -265,6 +270,28 @@ export function setSitOut(t: Table, uid: string, out: boolean, now: number): voi
     s.timeouts = 0
     s.afkHands = 0
     s.idleSince = null
+  }
+  touch(t)
+}
+
+/** Host-only: freeze or unfreeze every clock. Resuming pushes deadlines out by the time spent paused. */
+export function setPaused(t: Table, uid: string, on: boolean, now: number): void {
+  if (uid !== t.ownerUid) fail('Only the table owner can pause')
+  if (on === t.paused) return
+  if (on) {
+    t.paused = true
+    t.pausedAt = now
+  } else {
+    const d = Math.max(0, now - (t.pausedAt ?? now))
+    if (t.deadline !== null) t.deadline += d
+    if (t.nextHandAt !== null) t.nextHandAt += d
+    for (const s of t.seats) {
+      if (!s) continue
+      s.lastSeen += d
+      if (s.idleSince !== null) s.idleSince += d
+    }
+    t.paused = false
+    t.pausedAt = null
   }
   touch(t)
 }
@@ -403,6 +430,7 @@ function startNextHand(t: Table, deck: Card[], now: number): boolean {
  * `deckFn` is only called when a hand actually starts. Idempotent: returns false if nothing changed.
  */
 export function tick(t: Table, now: number, deckFn: () => Card[]): boolean {
+  if (t.paused) return false
   const before = t.version
   // 1. absent players
   for (let i = 0; i < MAX_SEATS; i++) {
@@ -489,6 +517,8 @@ export interface PublicTable {
   legal: Legal | null
   deadline: number | null
   nextHandAt: number | null
+  paused: boolean
+  pausedAt: number | null
   seats: (PublicSeat | null)[]
   /** Seats that can currently be dealt a hand (used so clients know when to nudge the table). */
   eligible: number
@@ -543,7 +573,7 @@ export function publicView(t: Table, now: number): PublicTable {
     sbSeat: h ? seatOfIdx(h.sb) : -1, bbSeat: h ? seatOfIdx(h.bb) : -1,
     sbAmount: h ? Math.min(t.settings.smallBlind, h.blinds.smallBlind) : 0, bbAmount: h ? h.blinds.bigBlind : 0,
     toAct, legal: h && toAct >= 0 ? legalActions(h, h.toAct) : null,
-    deadline: t.deadline, nextHandAt: t.nextHandAt, seats,
+    deadline: t.deadline, nextHandAt: t.nextHandAt, paused: t.paused, pausedAt: t.pausedAt, seats,
     result: res && h ? {
       showdown: res.showdown,
       pots: res.pots.map((p) => ({ amount: p.amount, winners: mapIdsToSeat(p.winners) })),

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { newDeck, shuffle, type Card, type Rng } from './cards.ts'
 import { legalActions } from './game.ts'
 import {
-  act, chipCheck, createTable, migrate, DEFAULT_TABLE_SETTINGS, holeCards, kick, leave, publicView, rebuy, seatOf,
+  act, chipCheck, createTable, migrate, setPaused, DEFAULT_TABLE_SETTINGS, holeCards, kick, leave, publicView, rebuy, seatOf,
   setSitOut, sit, tick, TableError, type Table, AWAY_LEAVE_MS, GRACE_MS,
 } from './table.ts'
 
@@ -286,6 +286,24 @@ describe('regressions from the bug pass', () => {
     sit(t, 'u1', 'B', undefined, 0)
     t.settings.startStack = 4000 // owner changes the rate later (same $2 now buys 4000)
     expect(publicView(t, 1).leaderboard.map((r) => r.netCents)).toEqual([0, 0])
+  })
+})
+
+describe('pause', () => {
+  it('freezes timers, then resumes with deadlines pushed out', () => {
+    const { t, now, d } = setup(3)
+    const deadline = t.deadline!
+    expect(() => setPaused(t, 'u1', true, now)).toThrow(TableError)
+    setPaused(t, 'u0', true, now + 1000)
+    // long past the deadline and the away limit: nothing happens
+    for (const x of t.seats) if (x) x.lastSeen = now
+    expect(tick(t, now + 10 * 60_000, d)).toBe(false)
+    expect(t.hand!.players.every((p) => !p.folded)).toBe(true)
+    expect(t.seats.filter(Boolean).every((x) => x!.status === 'active')).toBe(true)
+    setPaused(t, 'u0', false, now + 5000)
+    expect(t.deadline).toBe(deadline + 4000)
+    expect(publicView(t, now).paused).toBe(false)
+    check(t)
   })
 })
 
