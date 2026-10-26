@@ -5,15 +5,22 @@ import type { Table } from '../src/engine/table.ts'
 function memoryStore(): Store & { tables: Map<string, string>; pres: Map<string, Record<string, number>> } {
   const tables = new Map<string, string>()
   const pres = new Map<string, Record<string, number>>()
+  const ledgers = new Map<string, { at: number; lines: string[] }[]>()
   return {
     tables, pres,
     async run(code, fn) {
       const raw = tables.get(code)
       const l: Loaded = { table: raw ? (JSON.parse(raw) as Table) : null, presence: pres.get(code) ?? {} }
       const { table, result } = fn(l)
-      if (table) tables.set(code, JSON.stringify(table))
+      if (table) {
+        if (table.ledger.length) { (ledgers.get(code) ?? ledgers.set(code, []).get(code)!).push({ at: 0, lines: table.ledger }); table.ledger = [] }
+        tables.set(code, JSON.stringify(table))
+      }
       return result
     },
+    async loadTable(code) { const r = tables.get(code); return r ? (JSON.parse(r) as Table) : null },
+    async ledger(code, since) { return (ledgers.get(code) ?? []).filter((e) => e.at >= since) },
+    async hostTables() { return [] },
     async ping(code, uid, now) { pres.set(code, { ...(pres.get(code) ?? {}), [uid]: now }) },
   }
 }
@@ -50,5 +57,24 @@ describe('handler', () => {
     expect((await handle('a', { type: 'settings', code: 'ABCDE', settings: { smallBlind: null, bigBlind: null, startStack: null } }, deps)).ok).toBe(false)
     expect((await handle('a', { type: 'sit', code: 'ABCDE', name: 'Zed', seat: null }, deps)).error).not.toBe('Table is full')
     expect((await handle(actor, { type: 'act', code: 'ABCDE', handId: 1, seq: 1, kind: 'bogus' }, deps)).ok).toBe(false)
+  })
+})
+
+describe('history', () => {
+  it('keeps every action for the host, even after players leave', async () => {
+    const store = memoryStore()
+    const now = 1_000_000
+    const deps = { store, now: () => now }
+    await handle('a', { type: 'create' }, { ...deps, newCode: () => 'ABCDE' })
+    await handle('a', { type: 'sit', code: 'ABCDE', name: 'Ann' }, deps)
+    await handle('b', { type: 'sit', code: 'ABCDE', name: 'Bob' }, deps)
+    await handle('b', { type: 'leave', code: 'ABCDE' }, deps)
+    const bad = await handle('b', { type: 'history', code: 'ABCDE' }, deps)
+    expect(bad.ok).toBe(false)
+    const r = await handle('a', { type: 'history', code: 'ABCDE' }, deps)
+    expect(r.ok).toBe(true)
+    const lines = (r.history as { entries: { lines: string[] }[] }).entries.flatMap((e) => e.lines)
+    expect(lines.some((l) => l.includes('Bob leaves with 2,000 chips'))).toBe(true)
+    expect(lines.some((l) => l.includes('Ann sits'))).toBe(true)
   })
 })

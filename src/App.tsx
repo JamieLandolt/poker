@@ -44,7 +44,7 @@ export default function App() {
   if (!configured) return <Shell><div className="glass p-6 max-w-md mx-auto text-center">Firebase is not configured yet. Add the VITE_FIREBASE_* values to <code>.env.local</code>.</div></Shell>
   if (authErr) return <Shell><div className="glass p-6 max-w-md mx-auto text-center">{authErr}</div></Shell>
   if (!uid) return <Shell><div className="text-center text-white/60 pt-24">Connecting…</div></Shell>
-  return <Shell>{code.length === 5 ? <TableScreen key={code} code={code} uid={uid} /> : <div className="h-full overflow-y-auto"><Landing /></div>}</Shell>
+  return <Shell>{code.length === 5 ? <TableScreen key={code} code={code} uid={uid} /> : <div className="h-full overflow-y-auto"><Landing /><div className="max-w-md mx-auto mt-4 pb-6"><PastTables /></div></div>}</Shell>
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -137,6 +137,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const [logOpen, setLogOpen] = useState(() => lsGet(LOG_KEY) === '1')
   const [board, setBoard] = useState(false)
   const [settings, setSettings] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const [copied, setCopied] = useState(false)
   const [menu, setMenu] = useState(false)
   const [codeCopied, setCodeCopied] = useState(false)
@@ -150,6 +151,13 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const pub = live.pub
   const mySeat = pub ? pub.seats.findIndex((s) => s?.uid === uid) : -1
   const isOwner = pub?.ownerUid === uid
+  // Once you were seated and no longer are (left, removed, seat freed), go back to the lobby.
+  const wasSeated = useRef(false)
+  useEffect(() => {
+    if (!pub) return
+    if (mySeat >= 0) wasSeated.current = true
+    else if (wasSeated.current) location.hash = ''
+  }, [pub, mySeat])
   const toggleLog = () => setLogOpen((v) => { lsSet(LOG_KEY, v ? '0' : '1'); return !v })
   const link = `${location.origin}/#${code}`
   const copy = useCallback(async () => {
@@ -159,7 +167,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const afk = mySeat >= 0 && pub?.seats[mySeat]?.status === 'sitOut'
   const toggleAfk = () => void api('sitOut', { code, out: !afk }).then((r) => { if (!r.ok) alert(r.error) })
   const togglePause = () => void api('pause', { code, on: !pub?.paused })
-  const doLeave = () => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }) }
+  const doLeave = () => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }).then(() => { location.hash = '' }) }
   const copyCode = async () => {
     try { await navigator.clipboard.writeText(code); setCodeCopied(true); setTimeout(() => setCodeCopied(false), 1500) } catch { /* ignore */ }
   }
@@ -175,6 +183,24 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   if (!pub) return <div className="text-center text-white/60 pt-24">Loading table…</div>
 
   const joined = mySeat >= 0
+  const isHost = pub.ownerUid === uid || pub.creatorUid === uid
+  // No separate spectator view: without a seat you are in the lobby-style join screen. AFK players keep their seat.
+  if (!joined) {
+    const names = pub.seats.filter((x) => x).map((x) => x!.name)
+    return (
+      <div className="max-w-md mx-auto mt-10 space-y-3">
+        <div className="glass p-5 text-center space-y-3">
+          <div className="font-mono font-bold tracking-widest text-2xl">{code}</div>
+          <div className="text-white/70 text-sm">{pub.settings.smallBlind}/{pub.settings.bigBlind} blinds{names.length ? ` · ${names.join(', ')}` : ''}</div>
+          <button className="w-full rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
+          {isHost && <button className="w-full rounded-xl px-6 py-2.5 font-semibold bg-white/10" onClick={() => setShowHistory(true)}>History</button>}
+          <a href="#" className="block text-sm text-white/60">Back to lobby</a>
+        </div>
+        {showJoin && <JoinCard code={code} seat={wantSeat} full={pub.seats.every(Boolean)} onClose={() => setShowJoin(false)} />}
+        {showHistory && <HistoryCard code={code} onClose={() => setShowHistory(false)} />}
+      </div>
+    )
+  }
   const chip = 'rounded-lg bg-white/10 hover:bg-white/15 px-3 py-1.5 text-xs font-semibold'
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -186,6 +212,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           <button className={chip} onClick={copy}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
           {joined && <button className={chip} onClick={toggleAfk}>{afk ? "I'm back" : 'Go AFK'}</button>}
           {joined && <button className={`${chip} !text-red-300`} onClick={doLeave}>Leave</button>}
+          {isHost && <button className={chip} onClick={() => setShowHistory(true)}>History</button>}
           {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
           {isOwner && <button className={chip} onClick={togglePause}>{pub.paused ? '▶ Resume' : '⏸ Pause'}</button>}
         </span>
@@ -200,6 +227,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
         <div className="glass absolute right-0 top-full mt-2 z-40 p-2 flex flex-col gap-1.5 w-56 sm:hidden" style={{ background: 'rgba(16,20,32,.97)' }}>
           <button className={chip} onClick={() => { void copy(); setMenu(false) }}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
           {joined && <button className={chip} onClick={() => { toggleAfk(); setMenu(false) }}>{afk ? "I'm back" : 'Go AFK'}</button>}
+          {isHost && <button className={chip} onClick={() => { setShowHistory(true); setMenu(false) }}>History</button>}
           {isOwner && <button className={chip} onClick={() => { setSettings(true); setMenu(false) }}>⚙ Settings</button>}
           {isOwner && <button className={chip} onClick={() => { togglePause(); setMenu(false) }}>{pub.paused ? '▶ Resume timers' : '⏸ Pause timers'}</button>}
           {joined && <button className={`${chip} !text-red-300`} onClick={() => { setMenu(false); doLeave() }}>Leave table</button>}
@@ -243,14 +271,94 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
         )}
       </div>
 
-      {!joined && (
-        <div className="text-center py-2 flex-none">
-          <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
-        </div>
-      )}
-
-      {!joined && showJoin && <JoinCard code={code} seat={wantSeat} full={pub.seats.every(Boolean)} onClose={() => setShowJoin(false)} />}
+      {showHistory && <HistoryCard code={code} onClose={() => setShowHistory(false)} />}
       {settings && <SettingsCard code={code} pub={pub} onClose={() => setSettings(false)} />}
+    </div>
+  )
+}
+
+type HistoryData = { entries: { at: number; lines: string[] }[]; leaderboard: import('./engine/table.ts').PublicTable['leaderboard']; settings: import('./engine/table.ts').PublicTable['settings'] }
+
+/** Host-only record of everything that happened at the table, kept for a month. */
+function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
+  const [data, setData] = useState<HistoryData | null>(null)
+  const [err, setErr] = useState('')
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    let live = true
+    void api('history', { code }).then((r) => {
+      if (!live) return
+      if (r.ok) setData((r as unknown as { history: HistoryData }).history)
+      else setErr(r.error ?? 'Could not load the history')
+    })
+    return () => { live = false }
+  }, [code])
+  const stamp = (at: number) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const paid = (data?.settings.buyInCents ?? 0) > 0
+  const text = data ? [
+    `Table ${code}`,
+    ...data.leaderboard.map((r) => `${r.name}: ${r.buyIns} buy-in${r.buyIns === 1 ? '' : 's'}, ${r.seated ? `${r.stack} chips on table` : `left with ${r.cashedOut}`}, net ${r.net}${paid ? `, ${money(r.netCents, true) || '$0'}` : ''}`),
+    '',
+    ...data.entries.flatMap((e) => e.lines.map((l) => `${stamp(e.at)}  ${l}`)),
+  ].join('\n') : ''
+  const copy = async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } }
+  const sign = (n: number) => (n > 0 ? '+' : '')
+  return (
+    <div className="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm grid place-items-center p-4" onClick={onClose}>
+      <div className="glass p-4 w-full max-w-2xl max-h-[88dvh] flex flex-col" style={{ background: 'rgba(16,20,32,.97)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-bold">History · {code}</h2>
+          <div className="flex gap-2">
+            {data && <button className="rounded-lg px-3 py-1 text-sm bg-white/10" onClick={copy}>{copied ? 'Copied' : 'Copy all'}</button>}
+            <button className="text-white/60 px-1" onClick={onClose} aria-label="Close">✕</button>
+          </div>
+        </div>
+        {err && <div className="text-red-300 text-sm">{err}</div>}
+        {!data && !err && <div className="text-white/60 text-sm">Loading…</div>}
+        {data && (
+          <div className="min-h-0 flex-1 overflow-y-auto space-y-3">
+            <div className="text-xs">
+              <div className="flex gap-2 text-[10px] uppercase tracking-wide text-white/40 pb-1">
+                <span className="flex-1">Player</span><span className="w-16 text-right">Chips</span><span className="w-16 text-right">Net</span>{paid && <span className="w-16 text-right">Profit</span>}
+              </div>
+              {data.leaderboard.map((r) => (
+                <div key={r.uid} className="flex gap-2 py-1 border-t border-white/5 items-baseline">
+                  <span className="flex-1 min-w-0 truncate">{r.name} <span className="text-white/40">{r.buyIns}×{paid ? ` ${money(r.paidCents)}` : ''}</span></span>
+                  <span className="w-16 text-right num">{r.seated ? r.stack.toLocaleString() : `left ${r.cashedOut.toLocaleString()}`}</span>
+                  <span className={`w-16 text-right num ${r.net > 0 ? 'text-emerald-300' : r.net < 0 ? 'text-rose-300' : ''}`}>{sign(r.net)}{r.net.toLocaleString()}</span>
+                  {paid && <span className={`w-16 text-right num ${r.netCents > 0 ? 'text-emerald-300' : r.netCents < 0 ? 'text-rose-300' : ''}`}>{money(r.netCents, true) || '$0'}</span>}
+                </div>
+              ))}
+            </div>
+            <div className="font-mono text-[11px] text-white/70 space-y-px">
+              {data.entries.flatMap((e, i) => e.lines.map((l, j) => (
+                <div key={`${i}-${j}`} className="flex gap-2"><span className="text-white/30 shrink-0 w-24">{j === 0 ? stamp(e.at) : ''}</span><span>{l}</span></div>
+              )))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PastTables() {
+  const [tables, setTables] = useState<{ code: string; at: number }[]>([])
+  useEffect(() => {
+    let live = true
+    void api('myTables').then((r) => { if (live && r.ok) setTables((r as unknown as { tables: { code: string; at: number }[] }).tables ?? []) })
+    return () => { live = false }
+  }, [])
+  if (!tables.length) return null
+  return (
+    <div className="glass p-5 space-y-2">
+      <h2 className="font-bold">Your past tables</h2>
+      {tables.map((x) => (
+        <a key={x.code} href={`#${x.code}`} className="flex justify-between rounded-xl px-3 py-2 bg-white/5 hover:bg-white/10">
+          <span className="font-mono font-bold tracking-widest">{x.code}</span>
+          <span className="text-white/50 text-sm">{new Date(x.at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+        </a>
+      ))}
     </div>
   )
 }

@@ -58,6 +58,12 @@ export interface PlayerRecord {
 export interface Table {
   code: string
   ownerUid: string
+  /** Who created the table; keeps access to the history after leaving. */
+  creatorUid: string
+  /** Ledger lines waiting to be written by the store (it stamps the time and clears this). */
+  ledger: string[]
+  /** How many lines of the current hand's log are already in the ledger. */
+  ledgerHandLen: number
   settings: TableSettings
   /** Applied at the start of the next hand. */
   pendingSettings: TableSettings | null
@@ -126,6 +132,9 @@ export function migrate(t: Table): Table {
   t.actorUid ??= null
   t.paused ??= false
   t.pausedAt ??= null
+  t.creatorUid ??= t.ownerUid
+  t.ledger ??= []
+  t.ledgerHandLen ??= 0
   for (const s of t.seats) {
     if (!s) continue
     s.afkHands ??= 0
@@ -141,10 +150,12 @@ export function migrate(t: Table): Table {
 export function createTable(code: string, ownerUid: string, settings: TableSettings, now: number): Table {
   validateSettings(settings)
   void now
-  return {
-    code, ownerUid, settings, pendingSettings: null, seats: Array(MAX_SEATS).fill(null), button: -1,
+  const t: Table = {
+    code, ownerUid, creatorUid: ownerUid, ledger: [], ledgerHandLen: 0, settings, pendingSettings: null, seats: Array(MAX_SEATS).fill(null), button: -1,
     handCount: 0, phase: 'waiting', hand: null, nextHandAt: null, deadline: null, actorUid: null, paused: false, pausedAt: null, records: {}, version: 0,
   }
+  note(t, `Table ${code} created, blinds ${n(settings.smallBlind)}/${n(settings.bigBlind)}, ${n(settings.startStack)} chips per buy-in${settings.buyInCents ? ` at $${(settings.buyInCents / 100).toFixed(2)}` : ''}`)
+  return t
 }
 
 export function validateSettings(s: TableSettings) {
@@ -174,6 +185,7 @@ export function sit(t: Table, uid: string, rawName: unknown, wanted: number | un
     paidCents: (rec?.paidCents ?? 0) + (t.settings.buyInCents ?? 0), cashedOut: rec?.cashedOut ?? 0, handsWon: rec?.handsWon ?? 0, biggestPot: rec?.biggestPot ?? 0, seat: seat as number,
   }
   t.seats[seat as number] = { uid, name: finalName, stack, status: 'active', timeouts: 0, leaving: false, lastSeen: now, afkHands: 0, idleSince: null }
+  note(t, `${finalName} sits at seat ${(seat as number) + 1}, buys in ${n(stack)}${cash(t)} (buy-in ${t.records[uid].buyIns})`)
   prune(t)
   touch(t)
 }
@@ -187,16 +199,23 @@ function prune(t: Table) {
 
 function touch(t: Table) { t.version++ }
 
+const n = (x: number) => x.toLocaleString('en-US')
+const cash = (t: Table) => ((t.settings.buyInCents ?? 0) > 0 ? ` $${((t.settings.buyInCents ?? 0) / 100).toFixed(2)}` : '')
+/** Minimal permanent record of what happened at the table. */
+function note(t: Table, line: string) { t.ledger.push(line) }
+const stacksLine = (t: Table) => `Stacks: ${t.seats.filter((x): x is SeatInfo => !!x).map((x) => `${x.name} ${n(x.stack)}`).join(', ')}`
+
 function cashOutAndFree(t: Table, seat: number) {
   const s = t.seats[seat]
   if (!s) return
   const rec = t.records[s.uid]
   if (rec) { rec.cashedOut += s.stack; rec.seat = null }
+  note(t, `${s.name} leaves with ${n(s.stack)} chips`)
   t.seats[seat] = null
   // The table never ends up without an owner while someone is still sitting at it.
   if (s.uid === t.ownerUid) {
     const next = t.seats.find((x) => x && !x.leaving) ?? t.seats.find(Boolean)
-    if (next) t.ownerUid = next.uid
+    if (next) { t.ownerUid = next.uid; note(t, `${next.name} is now the host`) }
   }
 }
 
@@ -227,6 +246,8 @@ export function leave(t: Table, uid: string, now: number): void {
 export function kick(t: Table, byUid: string, targetUid: string, now: number): void {
   if (byUid !== t.ownerUid) fail('Only the table owner can remove players')
   if (byUid === targetUid) fail('Use Leave instead')
+  const ks = t.seats[seatOf(t, targetUid)]
+  if (ks) note(t, `Host removes ${ks.name}`)
   leave(t, targetUid, now)
   // A kicked player who was all-in keeps playing out the hand, then goes.
 }
@@ -247,6 +268,7 @@ export function rebuy(t: Table, uid: string): void {
   rec.invested += t.settings.startStack
   rec.paidCents = (rec.paidCents ?? 0) + (t.settings.buyInCents ?? 0)
   rec.buyIns += 1
+  note(t, `${s.name} rebuys ${n(t.settings.startStack)}${cash(t)} (buy-in ${rec.buyIns})`)
   touch(t)
 }
 
@@ -255,6 +277,8 @@ export function setSitOut(t: Table, uid: string, out: boolean, now: number): voi
   if (seat < 0) fail('Sit down first')
   const s = t.seats[seat]!
   if (s.status === 'busted') fail('Rebuy first')
+  if (out && s.status !== 'sitOut') note(t, `${s.name} goes AFK`)
+  if (!out && s.status === 'sitOut') note(t, `${s.name} is back`)
   if (out) {
     s.status = 'sitOut'
     s.idleSince = now
@@ -281,7 +305,7 @@ export function setPaused(t: Table, uid: string, on: boolean, now: number): void
   if (on) {
     t.paused = true
     t.pausedAt = now
-  } else {
+    note(t, 'Host paused the game')  } else {
     const d = Math.max(0, now - (t.pausedAt ?? now))
     if (t.deadline !== null) t.deadline += d
     if (t.nextHandAt !== null) t.nextHandAt += d
@@ -292,7 +316,7 @@ export function setPaused(t: Table, uid: string, on: boolean, now: number): void
     }
     t.paused = false
     t.pausedAt = null
-  }
+    note(t, 'Host resumed the game')  }
   touch(t)
 }
 
@@ -300,6 +324,7 @@ export function setSettings(t: Table, uid: string, s: TableSettings): void {
   if (uid !== t.ownerUid) fail('Only the table owner can change settings')
   validateSettings(s)
   t.pendingSettings = s
+  note(t, `Host sets blinds ${n(s.smallBlind)}/${n(s.bigBlind)}, ${n(s.startStack)} chips per buy-in${s.buyInCents ? ` at $${(s.buyInCents / 100).toFixed(2)}` : ''} (from next hand)`)
   touch(t)
 }
 
@@ -309,6 +334,7 @@ export function rename(t: Table, uid: string, rawName: unknown): void {
   const rec = t.records[uid]
   if (!rec) fail('Sit down first')
   const finalName = uniqueName(t, uid, name)
+  if (finalName !== rec.name) note(t, `${rec.name} is now called ${finalName}`)
   rec.name = finalName
   const seat = seatOf(t, uid)
   if (seat >= 0) t.seats[seat]!.name = finalName
@@ -333,6 +359,8 @@ export function act(t: Table, uid: string, a: { handId: number; seq: number; kin
 /** Sync seats from the hand, detect the end of the hand, re-arm the turn clock. */
 function afterHandChange(t: Table, now: number, rearm = false) {
   const h = t.hand!
+  for (const l of h.log.slice(t.ledgerHandLen)) note(t, l)
+  t.ledgerHandLen = h.log.length
   // keep stacks in sync for seats still holding their place
   for (const p of h.players) {
     const si = seatOf(t, p.uid)
@@ -373,8 +401,9 @@ function onHandOver(t: Table, now: number) {
     const s = t.seats[si]!
     s.stack = p.stack
     if (s.leaving) continue // freed when the next hand starts, so the result screen stays accurate
-    if (s.stack === 0) { s.status = 'busted'; s.idleSince = now }
+    if (s.stack === 0) { s.status = 'busted'; s.idleSince = now; note(t, `${s.name} is out of chips`) }
   }
+  note(t, stacksLine(t))
 }
 
 /** Seats that will be dealt into the next hand, in seat order. */
@@ -408,6 +437,7 @@ function startNextHand(t: Table, deck: Card[], now: number): boolean {
       s2.afkHands++
     }
   }
+  note(t, stacksLine(t))
   t.handCount++
   t.button = btn
   t.hand = dealHand({
@@ -421,6 +451,7 @@ function startNextHand(t: Table, deck: Card[], now: number): boolean {
   t.nextHandAt = null
   t.actorUid = null
   for (const s of seats) t.seats[s]!.stack = t.hand.players.find((p) => p.seat === s)!.stack
+  t.ledgerHandLen = 0
   afterHandChange(t, now, true)
   return true
 }
@@ -453,7 +484,7 @@ export function tick(t: Table, now: number, deckFn: () => Card[]): boolean {
         const s = t.seats[seatOf(t, h.players[idx].uid)]
         if (s) {
           s.timeouts++
-          if (s.timeouts >= 2 && s.status === 'active') { s.status = 'sitOut'; s.idleSince = now }
+          if (s.timeouts >= 2 && s.status === 'active') { s.status = 'sitOut'; s.idleSince = now; note(t, `${s.name} goes AFK`) }
         }
         afterHandChange(t, now, true)
       }
@@ -497,6 +528,7 @@ export interface PublicSeat {
 export interface PublicTable {
   code: string
   ownerUid: string
+  creatorUid: string
   settings: TableSettings
   pendingSettings: TableSettings | null
   phase: Table['phase']
@@ -565,7 +597,7 @@ export function publicView(t: Table, now: number): PublicTable {
     return { uid: r.uid, name: r.name, buyIns: r.buyIns, invested: r.invested, cashedOut: r.cashedOut, stack, net: stack + r.cashedOut - r.invested, paidCents: paid, netCents: Math.round((stack + r.cashedOut) * perChip) - paid, handsWon: r.handsWon, biggestPot: r.biggestPot, seated: !!s }
   }).sort((a, b) => b.net - a.net)
   return {
-    code: t.code, ownerUid: t.ownerUid, settings: t.settings, pendingSettings: t.pendingSettings,
+    code: t.code, ownerUid: t.ownerUid, creatorUid: t.creatorUid, settings: t.settings, pendingSettings: t.pendingSettings,
     phase: t.phase, handId: h?.handId ?? 0, seq: h?.seq ?? 0, street: h?.street ?? 'preflop', board,
     pot: h && t.phase === 'betting' ? h.players.reduce((a, p) => a + p.total, 0) : 0,
     currentBet: h?.currentBet ?? 0, minRaise: h?.minRaise ?? 0,

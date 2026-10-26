@@ -128,7 +128,7 @@ export function legalActions(state: GameState, seat: number): Legal {
 }
 
 function pushLog(state: GameState, line: string): string[] {
-  return [...state.log.slice(-14), line]
+  return [...state.log, line]
 }
 
 function put(p: Player, amount: number): Player {
@@ -349,7 +349,7 @@ function finishHand(state: GameState, showdown: boolean): GameState {
     phase: 'handOver',
     toAct: -1,
     seq: state.seq + 1,
-    log: log.slice(-15),
+    log,
     result: { showdown, pots: awards, payouts, hands, refund },
   }
 }

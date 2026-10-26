@@ -14,6 +14,10 @@ export interface Store {
   /** Run `fn` atomically against one table. `fn` returns the new table (or null for no change) and extra hole-card docs to write. */
   run<T>(code: string, fn: (l: Loaded) => { table: Table | null; result: T }): Promise<T>
   ping(code: string, uid: string, now: number): Promise<void>
+  loadTable(code: string): Promise<Table | null>
+  /** Ledger entries newer than `since`; older ones are dropped. */
+  ledger(code: string, since: number): Promise<{ at: number; lines: string[] }[]>
+  hostTables(uid: string, since: number): Promise<{ code: string; at: number }[]>
 }
 
 export interface Request {
@@ -23,11 +27,14 @@ export interface Request {
 }
 export interface Response {
   ok: boolean
+  history?: unknown
+  tables?: unknown
   error?: string
   code?: string
   version?: number
 }
 
+export const HISTORY_MS = 30 * 24 * 60 * 60 * 1000
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 export const CODE_RE = /^[A-HJ-NP-Z2-9]{5}$/
 
@@ -75,8 +82,19 @@ export async function handle(uid: string, req: Request, deps: HandlerDeps): Prom
       return { ok: false, error: 'Could not create a table, try again' }
     }
 
+    if (req.type === 'myTables') return { ok: true, tables: await deps.store.hostTables(uid, now - HISTORY_MS) }
+
     const code = String(req.code ?? '').toUpperCase()
     if (!CODE_RE.test(code)) return { ok: false, error: 'Bad table code' }
+
+    if (req.type === 'history') {
+      const t = await deps.store.loadTable(code)
+      if (!t) return { ok: false, error: 'Table not found' }
+      if (uid !== t.creatorUid && uid !== t.ownerUid) return { ok: false, error: 'Only the host can see the history' }
+      const entries = await deps.store.ledger(code, now - HISTORY_MS)
+      const pv = publicView(migrate(t), now)
+      return { ok: true, history: { entries, leaderboard: pv.leaderboard, settings: pv.settings } }
+    }
 
     if (req.type === 'ping') {
       await deps.store.ping(code, uid, now)
