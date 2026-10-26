@@ -34,9 +34,11 @@ interface Props {
   mySeat: number
   onPickSeat: (seat: number) => void
   logOpen: boolean
+  tableTheme: string
+  chipStyle: string
 }
 
-export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen }: Props) {
+export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen, tableTheme, chipStyle }: Props) {
   const pub = live.pub as PublicTable
   const { ref, w, h } = useSize()
   const now = useNow(250)
@@ -71,15 +73,9 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen
   const small = w < 560
   const cx = w / 2, cy = h / 2
   const rx = w * (small ? 0.4 : 0.42), ry = h * (small ? 0.38 : 0.34)
-  const hero = mySeat >= 0 ? mySeat : 0
-  // Seated players are spread evenly around the table (you at the bottom); spectators see all nine fixed seats.
-  const occupied = pub.seats.map((s, i) => (s ? i : -1)).filter((i) => i >= 0)
-  const ring = (mySeat >= 0 ? occupied : Array.from({ length: MAX_SEATS }, (_, i) => i))
-    .slice()
-    .sort((a, b) => ((a - hero + MAX_SEATS) % MAX_SEATS) - ((b - hero + MAX_SEATS) % MAX_SEATS))
+  // Seats have fixed places around the table, so you sit exactly where you clicked "Sit".
   const pos = (seat: number) => {
-    const k = Math.max(0, ring.indexOf(seat))
-    const th = (Math.PI / 180) * (90 + k * (360 / Math.max(ring.length, 1)))
+    const th = (Math.PI / 180) * (90 + seat * (360 / MAX_SEATS))
     return { x: cx + rx * Math.cos(th), y: cy + ry * Math.sin(th) }
   }
   const deck = { x: cx - (small ? 0.2 : 0.2) * w, y: cy - 0.02 * h }
@@ -157,7 +153,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen
 
   return (
     <div className="flex flex-col gap-3">
-      <div ref={ref} className="relative w-full select-none mt-14" style={{ aspectRatio: small ? '3 / 4.1' : '16 / 9.5', maxHeight: '76vh' }}>
+      <div ref={ref} data-table={tableTheme} data-chips={chipStyle} className="relative w-full select-none mt-14" style={{ aspectRatio: small ? '3 / 4.1' : '16 / 9.5', maxHeight: '76vh' }}>
         <div className="rail" />
         <div className="felt" />
 
@@ -251,7 +247,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen
                   </div>
                   <div className="num text-[12px] text-amber-200 font-bold">{s.status === 'busted' ? 'busted' : s.stack.toLocaleString()}</div>
                   <div className="h-4 text-[11px] text-white/60 truncate">
-                    {isTurn ? (isMe ? 'your move' : 'thinking…') : s.status === 'sitOut' ? `${s.afkLeft ?? 0} hands left` : pub.phase === 'betting' ? s.lastAction : ''}
+                    {isTurn ? (isMe ? 'your move' : 'thinking…') : s.status === 'sitOut' ? `missed ${s.afkMissed ?? 0} hand${s.afkMissed === 1 ? '' : 's'}` : pub.phase === 'betting' ? s.lastAction : ''}
                     {winners.has(s.seat) && pub.result && <span className="text-emerald-300 font-bold"> +{won(s.seat).toLocaleString()}</span>}
                   </div>
                   <div className="absolute -top-2 -right-2 flex flex-col gap-0.5">
@@ -284,14 +280,14 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, logOpen
         ) : myPub && myPub.stack === 0 && !(myPub.inHand && !myPub.folded && pub.phase === 'betting') ? (
           <div className="text-center space-y-2">
             <div className="text-white/80">{myPub.status === 'busted' ? "You're out of chips." : ''}</div>
-            <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-amber-400 to-amber-600 text-black pulse" disabled={busy} onClick={() => send('rebuy')}>
+            <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black pulse" disabled={busy} onClick={() => send('rebuy')}>
               Rebuy {money(pub.settings.buyInCents)}{pub.settings.buyInCents ? ' · ' : ''}{pub.settings.startStack.toLocaleString()} chips
             </button>
           </div>
         ) : myPub?.status === 'sitOut' ? (
           <div className="text-center space-y-1">
-            <div className="text-white/70 text-sm">You're AFK. Your seat is held for {myPub.afkLeft ?? 0} more hands.</div>
-            <button className="rounded-xl px-6 py-3 font-bold bg-emerald-500 text-black" onClick={() => send('sitOut', { out: false })}>I'm back</button>
+            <div className="text-white/70 text-sm">You're AFK. Your seat is held until you come back.</div>
+            <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-r from-emerald-400 to-yellow-300 text-black" onClick={() => send('sitOut', { out: false })}>I'm back</button>
           </div>
         ) : (
           <div className="text-center text-sm text-white/60 pt-4">
@@ -354,7 +350,7 @@ function ActionBar({ pub, myStack, busy, onAct }: { pub: PublicTable; myStack: n
           <div className="flex items-center gap-2 justify-center">
             <input type="number" inputMode="numeric" className="w-32 rounded-lg bg-black/40 border border-white/20 px-3 py-2 num text-center font-bold" value={amount} min={lg.minRaiseTo} max={lg.maxRaiseTo}
               onChange={(e) => setAmount(e.target.value)} aria-label={`${verb} amount`} />
-            <button className={`${btn} bg-amber-500 text-black`} disabled={busy || !valid} onClick={() => onAct(allIn ? 'allin' : 'raise', parsed)}>
+            <button className={`${btn} bg-gradient-to-r from-emerald-400 to-yellow-300 text-black`} disabled={busy || !valid} onClick={() => onAct(allIn ? 'allin' : 'raise', parsed)}>
               {allIn ? 'All-in' : `${verb} to`} {valid ? parsed.toLocaleString() : ''}
             </button>
           </div>

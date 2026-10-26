@@ -7,8 +7,8 @@
   --line: rgba(255, 255, 255, 0.09);
   --gold: #f5c451;
   --mint: #3ddc97;
-  --felt-a: #0f6b50;
-  --felt-b: #07382b;
+  --felt-a: #86b02a;
+  --felt-b: #2f4d0d;
 }
 html, body, #root { height: 100%; }
 body {
@@ -31,8 +31,8 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 .rail {
   position: absolute; inset: 4% 3%;
   border-radius: 50%;
-  background: linear-gradient(145deg, #2b2f3d, #12141c);
-  box-shadow: 0 30px 80px rgba(0,0,0,.65), inset 0 2px 0 rgba(255,255,255,.08);
+  background: var(--rail, linear-gradient(145deg, #2b2f3d, #12141c));
+  box-shadow: 0 30px 80px rgba(0,0,0,.65), 0 0 50px var(--rail-glow, transparent), inset 0 2px 0 rgba(255,255,255,.08);
 }
 .felt {
   position: absolute; inset: 3.2% 2.6%;
@@ -42,7 +42,7 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 }
 .felt::after {
   content: ''; position: absolute; inset: 14% 12%; border-radius: 50%;
-  border: 1.5px dashed rgba(255,255,255,.09);
+  border: 1.5px dashed var(--felt-line, rgba(255,255,255,.1));
 }
 
 /* ---------- cards ---------- */
@@ -126,3 +126,71 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
   .pc-fly, .pc-inner.flip, .chip-fly, .pulse { animation-duration: .01s !important; animation-delay: 0s !important; }
   .pc-inner { transition: none; }
 }
+
+/* Native select arrows sit hard against the edge; draw our own with proper padding. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.5rem !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23aab2c0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+}
+
+/* ---------- table designs (felt + rail), picked per browser ---------- */
+[data-table='classic'] { --felt-a: #86b02a; --felt-b: #2f4d0d; --felt-line: rgba(255,255,170,.22); }
+[data-table='midnight'] {
+  --felt-a: #21468f; --felt-b: #0a1838; --felt-line: rgba(160,190,255,.2);
+  --rail: linear-gradient(145deg, #b9c4dd, #4a5878 55%, #232b40);
+}
+[data-table='crimson'] {
+  --felt-a: #9a2233; --felt-b: #3a0911; --felt-line: rgba(255,200,200,.16);
+  --rail: linear-gradient(145deg, #6b3d1d, #2c1608 60%, #170b04);
+}
+[data-table='noir'] {
+  --felt-a: #2c2c33; --felt-b: #0a0a0d; --felt-line: rgba(245,196,81,.25);
+  --rail: linear-gradient(145deg, #f5d37a, #b8892b 55%, #6e4f12); --rail-glow: rgba(245,196,81,.18);
+}
+[data-table='neon'] {
+  --felt-a: #0b3347; --felt-b: #04121c; --felt-line: rgba(34,211,238,.28);
+  --rail: linear-gradient(120deg, #22d3ee, #5eead4 45%, #facc15);
+  --rail-glow: rgba(34,211,238,.28);
+}
+[data-table='violet'] {
+  --felt-a: #5d2b8f; --felt-b: #1f0b38; --felt-line: rgba(220,190,255,.2);
+  --rail: linear-gradient(145deg, #3a3550, #17141f);
+}
+.swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255,255,255,.3); }
+.swatch.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.35); }
+
+/* ---------- chip designs (default 'tower' is the stacked-disc style above) ---------- */
+[data-chips='classic'] .chip-tower { flex-direction: row; }
+[data-chips='classic'] .chip {
+  width: 22px; height: 22px; margin-top: 0; margin-left: -9px; border-radius: 50%;
+  background: radial-gradient(circle, var(--c) 0 52%, rgba(255,255,255,.92) 53% 60%, var(--c) 61%);
+  border: 3px dashed rgba(255,255,255,.9);
+  box-shadow: 0 2px 4px rgba(0,0,0,.55);
+}
+[data-chips='classic'] .chip:first-child { margin-left: 0; }
+[data-chips='classic'] .chip::after { display: none; }
+
+[data-chips='flat'] .chip-tower { flex-direction: row; }
+[data-chips='flat'] .chip {
+  width: 20px; height: 20px; margin-top: 0; margin-left: -7px; border-radius: 50%;
+  background: var(--c); border: 2px solid rgba(0,0,0,.35);
+  box-shadow: 0 1px 3px rgba(0,0,0,.45), inset 0 0 0 3px rgba(255,255,255,.28);
+}
+[data-chips='flat'] .chip:first-child { margin-left: 0; }
+[data-chips='flat'] .chip::after { display: none; }
+
+[data-chips='plaque'] .chip { width: 30px; height: 11px; margin-top: -6px; border-radius: 3px; border: 1.5px solid rgba(255,255,255,.85); }
+[data-chips='plaque'] .chip::after { left: 12%; right: 12%; border-radius: 2px; border-style: solid; border-color: rgba(255,255,255,.35); }
+
+[data-chips='gold'] .chip {
+  background: linear-gradient(145deg, #fde68a, #d99a1c 55%, #8a5a08);
+  border-color: #fff3c4;
+}
+[data-chips='gold'] .chip::after { border-color: rgba(120,70,0,.55); }
+
+[data-chips='neon'] .chip { background: #0a1220; border: 1.5px solid var(--c); box-shadow: 0 0 8px var(--c), inset 0 0 6px var(--c); }
+[data-chips='neon'] .chip::after { border-color: var(--c); }

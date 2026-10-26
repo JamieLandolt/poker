@@ -5,6 +5,17 @@ import { hue, money } from './hue.ts'
 
 const NAME_KEY = 'poker:name'
 const LOG_KEY = 'poker:log'
+const THEME_KEY = 'poker:table'
+const CHIP_KEY = 'poker:chips'
+const CHIP_STYLES: [string, string][] = [['tower', 'Stacks'], ['classic', 'Casino'], ['flat', 'Flat'], ['plaque', 'Plaques'], ['gold', 'Gold'], ['neon', 'Neon']]
+const TABLE_THEMES: [string, string, string][] = [
+  ['classic', 'Lime green', 'linear-gradient(135deg,#86b02a,#2f4d0d)'],
+  ['midnight', 'Midnight blue', 'linear-gradient(135deg,#21468f,#0a1838)'],
+  ['crimson', 'Crimson velvet', 'linear-gradient(135deg,#9a2233,#3a0911)'],
+  ['noir', 'Noir & gold', 'linear-gradient(135deg,#f5d37a,#2c2c33)'],
+  ['neon', 'Neon', 'linear-gradient(135deg,#22d3ee,#facc15)'],
+  ['violet', 'Violet', 'linear-gradient(135deg,#5d2b8f,#1f0b38)'],
+]
 const lsGet = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
 const lsSet = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* ignore */ } }
 
@@ -38,7 +49,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-full max-w-7xl mx-auto px-3 sm:px-5 py-3">
       <header className="flex items-center justify-between mb-2">
-        <a href="#" className="text-xl font-extrabold tracking-tight">♠ <span className="bg-gradient-to-r from-emerald-300 to-amber-300 bg-clip-text text-transparent">Poker</span></a>
+        <a href="#" className="text-xl font-extrabold tracking-tight">♠ <span className="bg-gradient-to-r from-emerald-300 to-yellow-300 bg-clip-text text-transparent">Poker</span></a>
       </header>
       {children}
     </div>
@@ -85,8 +96,7 @@ function Landing() {
             <input className={field} inputMode="numeric" value={chips} onChange={(e) => setChips(e.target.value)} />
           </label>
         </div>
-        <p className="text-xs text-white/40">e.g. $2 can buy 1,000 chips or 10,000, you decide. The leaderboard shows both chips and money.</p>
-        <button className="w-full rounded-xl px-4 py-3 font-bold bg-gradient-to-b from-emerald-400 to-emerald-600 text-black disabled:opacity-50" disabled={busy} onClick={create}>Create table</button>
+        <button className="w-full rounded-xl px-4 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black disabled:opacity-50" disabled={busy} onClick={create}>Create table</button>
       </div>
       <div className="glass p-5 space-y-3">
         <h2 className="font-bold">Join with a code</h2>
@@ -108,6 +118,9 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const [board, setBoard] = useState(false)
   const [settings, setSettings] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [tableTheme, setTableTheme] = useState(() => { const v = lsGet(THEME_KEY); return TABLE_THEMES.some((t) => t[0] === v) ? (v as string) : 'classic' })
+  const [chipStyle, setChipStyle] = useState(() => { const v = lsGet(CHIP_KEY); return CHIP_STYLES.some((c) => c[0] === v) ? (v as string) : 'tower' })
+  const [themes, setThemes] = useState(false)
 
   useEffect(() => subscribeTable(code, uid, (p) => setLive((l) => ({ ...l, ...p }))), [code, uid])
 
@@ -124,7 +137,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
     <div className="glass p-6 max-w-sm mx-auto text-center space-y-3 mt-10">
       <div className="font-bold text-lg">Table not found</div>
       <div className="text-white/60 text-sm">Check the link, or start a new table.</div>
-      <a href="#" className="inline-block rounded-xl px-5 py-2.5 bg-emerald-500 text-black font-bold">Create a table</a>
+      <a href="#" className="inline-block rounded-xl px-5 py-2.5 bg-gradient-to-r from-emerald-400 to-yellow-300 text-black font-bold">Create a table</a>
     </div>
   )
   if (live.status === 'error') return <div className="glass p-6 max-w-sm mx-auto text-center mt-10">Lost connection. Retrying…</div>
@@ -139,22 +152,38 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
         <button className={chip} onClick={copy}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
         <button className={chip} onClick={() => setBoard((v) => !v)}>🏆 Leaderboard</button>
         <button className={chip} onClick={toggleLog}>{logOpen ? 'Hide log' : 'Show log'}</button>
+        <button className={chip} onClick={() => setThemes((v) => !v)}>🎨 Look</button>
         <span className="text-white/50 ml-auto">Blinds {pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
         {joined && <button className={chip} onClick={() => void api('sitOut', { code, out: pub.seats[mySeat]?.status !== 'sitOut' }).then((r) => { if (!r.ok) alert(r.error) })}>{pub.seats[mySeat]?.status === 'sitOut' ? "I'm back" : 'Go AFK'}</button>}
         {joined && <button className={`${chip} !text-red-300`} onClick={() => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }) }}>Leave</button>}
         {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
       </div>
 
+      {themes && (
+        <div className="glass px-3 py-2 mb-2 flex items-center gap-3 flex-wrap text-xs">
+          <span className="text-white/60">Table</span>
+          {TABLE_THEMES.map(([id, label, bg]) => (
+            <button key={id} title={label} aria-label={label} className={`swatch ${tableTheme === id ? 'on' : ''}`} style={{ background: bg }}
+              onClick={() => { setTableTheme(id); lsSet(THEME_KEY, id) }} />
+          ))}
+          <span className="text-white/50">{TABLE_THEMES.find((t) => t[0] === tableTheme)?.[1]}</span>
+          <span className="text-white/60 ml-3">Chips</span>
+          {CHIP_STYLES.map(([id, label]) => (
+            <button key={id} className={`rounded-lg px-2.5 py-1 font-semibold ${chipStyle === id ? 'bg-white text-black' : 'bg-white/10'}`}
+              onClick={() => { setChipStyle(id); lsSet(CHIP_KEY, id) }}>{label}</button>
+          ))}
+        </div>
+      )}
       <div className="lg:flex lg:items-start lg:gap-4">
         <div className="flex-1 min-w-0">
-          <TableView code={code} uid={uid} live={live} mySeat={mySeat} logOpen={logOpen} onPickSeat={(s) => { setWantSeat(s); setShowJoin(true) }} />
+          <TableView code={code} uid={uid} live={live} mySeat={mySeat} logOpen={logOpen} tableTheme={tableTheme} chipStyle={chipStyle} onPickSeat={(s) => { setWantSeat(s); setShowJoin(true) }} />
         </div>
         {board && <Leaderboard pub={pub} uid={uid} isOwner={isOwner} code={code} onClose={() => setBoard(false)} />}
       </div>
 
       {!joined && (
         <div className="text-center mt-3">
-          <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-emerald-600 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
+          <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
         </div>
       )}
 
@@ -194,7 +223,7 @@ function JoinCard({ code, seat, full, onClose }: { code: string; seat?: number; 
       {err && <div className="text-red-300 text-sm mt-2">{err}</div>}
       <div className="flex gap-2 justify-end mt-4">
         <button className="rounded-xl px-4 py-2 bg-white/10" onClick={onClose}>Just watch</button>
-        <button className="rounded-xl px-5 py-2 font-bold bg-emerald-500 text-black disabled:opacity-50" disabled={busy || full} onClick={go}>Take a seat</button>
+        <button className="rounded-xl px-5 py-2 font-bold bg-gradient-to-r from-emerald-400 to-yellow-300 text-black disabled:opacity-50" disabled={busy || full} onClick={go}>Take a seat</button>
       </div>
     </Modal>
   )
@@ -250,7 +279,7 @@ function SettingsCard({ code, pub, onClose }: { code: string; pub: import('./eng
       <label className="block text-sm mb-2">Buy-in price ($, 0 = don't track money)<input className={f} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
       <label className="block text-sm mb-2">Chips per buy-in (at least 20 big blinds)<input className={f} type="number" min={bb * 20} step={100} value={stack} onChange={(e) => setStack(Math.floor(Number(e.target.value)))} /></label>
       {err && <div className="text-red-300 text-sm">{err}</div>}
-      <div className="flex gap-2 justify-end mt-3"><button className="rounded-xl px-4 py-2 bg-white/10" onClick={onClose}>Cancel</button><button className="rounded-xl px-5 py-2 font-bold bg-emerald-500 text-black" onClick={save}>Save</button></div>
+      <div className="flex gap-2 justify-end mt-3"><button className="rounded-xl px-4 py-2 bg-white/10" onClick={onClose}>Cancel</button><button className="rounded-xl px-5 py-2 font-bold bg-gradient-to-r from-emerald-400 to-yellow-300 text-black" onClick={save}>Save</button></div>
     </Modal>
   )
 }

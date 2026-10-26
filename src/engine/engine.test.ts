@@ -75,6 +75,15 @@ describe('evaluate', () => {
 })
 
 describe('pots', () => {
+  it('pays folded chips to the last live player even if they put nothing in', () => {
+    const r = buildPots([
+      { id: 0, total: 10, folded: true },
+      { id: 1, total: 20, folded: true },
+      { id: 2, total: 0, folded: false },
+    ])
+    expect(r.refund).toEqual({ id: 1, amount: 10 })
+    expect(r.pots).toEqual([{ amount: 20, eligible: [2] }])
+  })
   it('refunds an uncalled bet', () => {
     const r = buildPots([{ id: 0, total: 100, folded: false }, { id: 1, total: 40, folded: false }])
     expect(r.refund).toEqual({ id: 0, amount: 60 })

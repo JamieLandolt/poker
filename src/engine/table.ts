@@ -9,9 +9,6 @@ export const AWAY_SIT_OUT_MS = 45_000
 export const AWAY_LEAVE_MS = 120_000
 export const NEXT_HAND_MS = 6000
 export const NEXT_HAND_FOLD_MS = 3500
-/** An away player keeps their seat for this many hands. */
-export const AFK_MAX_HANDS = 10
-export const SITOUT_MAX_MS = 30 * 60_000
 export const BUSTED_MAX_MS = 5 * 60_000
 
 export interface TableSettings {
@@ -37,7 +34,7 @@ export interface SeatInfo {
   /** Wants to go once the current hand is over (all-in when they left). */
   leaving: boolean
   lastSeen: number
-  /** Hands dealt since the player went away. They lose the seat after AFK_MAX_HANDS. */
+  /** Hands dealt since the player went away (shown to the table; the seat is held until they return or the host removes them). */
   afkHands: number
   /** When the seat became busted or sat out; used to free abandoned seats. */
   idleSince: number | null
@@ -379,7 +376,6 @@ function startNextHand(t: Table, deck: Card[], now: number): boolean {
     const s2 = t.seats[i]
     if (s2 && s2.status === 'sitOut') {
       s2.afkHands++
-      if (s2.afkHands > AFK_MAX_HANDS && !seats.includes(i)) cashOutAndFree(t, i)
     }
   }
   t.handCount++
@@ -412,8 +408,7 @@ export function tick(t: Table, now: number, deckFn: () => Card[]): boolean {
     const away = now - s.lastSeen
     // A disconnected active player is moved to AFK (keeps the seat for a few hands in case they come back).
     if (away > AWAY_SIT_OUT_MS && s.status === 'active') setSitOut(t, s.uid, true, now)
-    if (s.status === 'sitOut' && s.idleSince !== null && now - s.idleSince > SITOUT_MAX_MS && !contesting(t, s.uid)) leave(t, s.uid, now)
-    else if (s.status === 'busted' && s.idleSince !== null && now - s.idleSince > BUSTED_MAX_MS && !contesting(t, s.uid)) leave(t, s.uid, now)
+    if (s.status === 'busted' && s.idleSince !== null && now - s.idleSince > BUSTED_MAX_MS && !contesting(t, s.uid)) leave(t, s.uid, now)
   }
   // 2. turn timeout
   if (t.phase === 'betting' && t.hand && t.deadline !== null && now > t.deadline + GRACE_MS) {
@@ -456,8 +451,8 @@ export interface PublicSeat {
   stack: number
   status: SeatStatus
   leaving: boolean
-  /** Hands left before an away player loses the seat; null when not away. */
-  afkLeft: number | null
+  /** Hands an away player has missed so far; null when not away. */
+  afkMissed: number | null
   inHand: boolean
   folded: boolean
   allIn: boolean
@@ -512,7 +507,7 @@ export function publicView(t: Table, now: number): PublicTable {
     const hp = h && hi >= 0 ? h.players[hi] : null
     return {
       seat: i, uid: s.uid, name: s.name, stack: s.stack, status: s.status, leaving: s.leaving,
-      afkLeft: s.status === 'sitOut' ? Math.max(0, AFK_MAX_HANDS - (s.afkHands ?? 0)) : null,
+      afkMissed: s.status === 'sitOut' ? (s.afkHands ?? 0) : null,
       inHand: !!hp, folded: !!hp?.folded, allIn: !!hp?.allIn,
       bet: hp && t.phase === 'betting' ? hp.bet : 0,
       lastAction: hp ? hp.lastAction : '',

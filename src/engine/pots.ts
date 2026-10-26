@@ -44,6 +44,13 @@ export function buildPots(input: readonly Contribution[]): PotResult {
     prev = level
   }
 
+  // Everyone still in has put nothing in (e.g. the button when both blinds fold or leave): they take whatever is left.
+  if (pots.length === 0) {
+    const remaining = players.reduce((a, p) => a + p.total, 0)
+    const live = players.filter((p) => !p.folded).map((p) => p.id)
+    if (remaining > 0 && live.length) return { refund, pots: [{ amount: remaining, eligible: live }] }
+  }
+
   // Chips above the highest live level (only possible from folded players) join the last pot.
   let leftover = 0
   for (const p of players) leftover += Math.max(0, p.total - prev)

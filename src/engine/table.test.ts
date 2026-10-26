@@ -3,7 +3,7 @@ import { newDeck, shuffle, type Card, type Rng } from './cards.ts'
 import { legalActions } from './game.ts'
 import {
   act, chipCheck, createTable, migrate, DEFAULT_TABLE_SETTINGS, holeCards, kick, leave, publicView, rebuy, seatOf,
-  setSitOut, sit, tick, TableError, type Table, AWAY_LEAVE_MS, GRACE_MS, AFK_MAX_HANDS,
+  setSitOut, sit, tick, TableError, type Table, AWAY_LEAVE_MS, GRACE_MS,
 } from './table.ts'
 
 function seeded(seed: number): Rng {
@@ -194,7 +194,7 @@ describe('money ratio', () => {
 })
 
 describe('AFK', () => {
-  it('an away player keeps the seat for a few hands, then loses it; coming back resets', () => {
+  it('an away player keeps the seat indefinitely and is not dealt in', () => {
     const rng = seeded(5)
     const d = deck(rng)
     const t = createTable('ABCDE', 'u0', S, 0)
@@ -202,42 +202,32 @@ describe('AFK', () => {
     for (let i = 0; i < 3; i++) sit(t, `u${i}`, `P${i}`, undefined, now)
     tick(t, now, d); now += 3000; tick(t, now, d)
     setSitOut(t, 'u2', true, now)
-    expect(t.seats[2]!.status).toBe('sitOut')
-    // play AFK_MAX_HANDS hands heads-up between u0 and u1: fold each hand
-    for (let h = 0; h < AFK_MAX_HANDS; h++) {
+    for (let h = 0; h < 30; h++) {
       while (t.phase === 'betting') {
         for (const x of t.seats) if (x) x.lastSeen = now
         act(t, actor(t), { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'fold' }, now)
       }
+      if (h > 0) expect(t.hand!.players.map((p) => p.uid)).not.toContain('u2')
       now += 10_000
       for (const x of t.seats) if (x) x.lastSeen = now
       tick(t, now, d)
     }
     expect(seatOf(t, 'u2')).toBeGreaterThanOrEqual(0)
-    expect(publicView(t, now).seats[2]!.afkLeft).toBeLessThanOrEqual(1)
+    expect(publicView(t, now).seats[2]!.afkMissed).toBeGreaterThan(20)
+    // far in the future, still held
+    for (const x of t.seats) if (x) x.lastSeen = now + 5 * 24 * 3600_000
+    tick(t, now + 5 * 24 * 3600_000, d)
+    expect(seatOf(t, 'u2')).toBeGreaterThanOrEqual(0)
     setSitOut(t, 'u2', false, now)
-    expect(t.seats[2]!.afkHands).toBe(0)
+    expect(t.seats[2]!.status).toBe('active')
     check(t)
   })
-  it('loses the seat and cashes out after too many hands away', () => {
-    const rng = seeded(6)
-    const d = deck(rng)
+  it('the host can remove an away player', () => {
     const t = createTable('ABCDE', 'u0', S, 0)
-    let now = 1000
-    for (let i = 0; i < 3; i++) sit(t, `u${i}`, `P${i}`, undefined, now)
-    tick(t, now, d); now += 3000; tick(t, now, d)
-    setSitOut(t, 'u2', true, now)
-    for (let h = 0; h < AFK_MAX_HANDS + 2; h++) {
-      while (t.phase === 'betting') {
-        for (const x of t.seats) if (x) x.lastSeen = now
-        act(t, actor(t), { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'fold' }, now)
-      }
-      now += 10_000
-      for (const x of t.seats) if (x) x.lastSeen = now
-      tick(t, now, d)
-    }
+    for (let i = 0; i < 3; i++) sit(t, `u${i}`, `P${i}`, undefined, 0)
+    setSitOut(t, 'u2', true, 1)
+    kick(t, 'u0', 'u2', 2)
     expect(seatOf(t, 'u2')).toBe(-1)
-    expect(t.records.u2.cashedOut).toBeGreaterThan(970) // may have posted a blind before going away
     check(t)
   })
 })
@@ -288,7 +278,7 @@ describe('regressions from the bug pass', () => {
     expect(m.seats[0]!.afkHands).toBe(0)
     expect(m.settings.buyInCents).toBe(0)
     setSitOut(m, 'u0', true, 5)
-    expect(publicView(m, 5).seats[0]!.afkLeft).toBe(AFK_MAX_HANDS)
+    expect(publicView(m, 5).seats[0]!.afkMissed).toBe(0)
   })
   it('money net uses what each chip cost, even after the rate changes', () => {
     const t = createTable('ABCDE', 'u0', S, 0)
@@ -384,13 +374,13 @@ describe('property: chaos', () => {
       expect(handsSeen.size).toBeGreaterThan(20)
     }
   })
-  it('absent players go AFK first and are only removed after a long time', () => {
+  it('absent players go AFK and keep their seat', () => {
     const { t, now, d } = setup(3)
     tick(t, now + AWAY_LEAVE_MS + 10, d)
     expect(t.seats.filter((x) => x?.status === 'sitOut').length).toBeGreaterThan(0)
     for (const x of t.seats) if (x) x.lastSeen = now + 40 * 60_000
     tick(t, now + 40 * 60_000, d)
-    expect(t.seats.filter(Boolean).length).toBe(0)
+    expect(t.seats.filter(Boolean).length).toBe(3)
     check(t)
   })
 })
