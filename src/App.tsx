@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import TableView from './TableView.tsx'
 import { api, configured, ensureUser, subscribeTable, type Live } from './net.ts'
 import { hue, money } from './hue.ts'
@@ -15,7 +15,7 @@ const TABLE_THEMES: [string, string, string][] = [
   ['midnight', 'Midnight blue', 'radial-gradient(circle at 40% 35%,#0b3347,#04121c 90%) padding-box, linear-gradient(120deg,#22d3ee,#5eead4 45%,#facc15) border-box'],
   ['crimson', 'Crimson velvet', 'radial-gradient(circle at 40% 35%,#9a2233,#3a0911 90%) padding-box, linear-gradient(145deg,#6b3d1d,#2c1608 60%,#170b04) border-box'],
   ['noir', 'Noir & gold', 'radial-gradient(circle at 40% 35%,#2c2c33,#0a0a0d 90%) padding-box, linear-gradient(145deg,#f5d37a,#b8892b 55%,#6e4f12) border-box'],
-  ['neon', 'Neon', 'radial-gradient(circle at 40% 35%,#0f5a36,#04180e 90%) padding-box, linear-gradient(120deg,#6ee7b7,#a3e635 50%,#fde047) border-box'],
+  ['neon', 'Neon', 'radial-gradient(circle at 40% 35%,#6fc63a,#14501c 90%) padding-box, linear-gradient(120deg,#6ee7b7,#a3e635 50%,#fde047) border-box'],
   ['violet', 'Violet', 'radial-gradient(circle at 40% 35%,#5d2b8f,#1f0b38 90%) padding-box, linear-gradient(145deg,#3a3550,#17141f) border-box'],
 ]
 const lsGet = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
@@ -109,6 +109,24 @@ function Landing() {
       </div>
       {err && <div className="text-center text-red-300 text-sm">{err}</div>}
     </div>
+  )
+}
+
+const KEEP = /^--- Hand|\b(bets|raises to|calls|win|wins)\b/
+
+/** Minimal log: bets, calls and wins only. This hand and the last one; scroll up to read the previous hand. */
+function HandLog({ handId, lines }: { handId: number; lines: string[] }) {
+  const [hist, setHist] = useState<Record<number, string[]>>({})
+  const box = useRef<HTMLElement>(null)
+  const kept = lines.filter((l) => KEEP.test(l))
+  if (kept.length > (hist[handId]?.length ?? 0)) setHist({ ...hist, [handId]: kept })
+  const ids = Object.keys(hist).map(Number).sort((a, b) => a - b).slice(-2)
+  useEffect(() => { box.current?.scrollTo({ top: box.current.scrollHeight }) }, [hist])
+  return (
+    <aside ref={box} className="glass p-3 text-xs font-mono text-white/70 max-h-64 overflow-y-auto" aria-live="polite">
+      <div className="text-[11px] font-sans font-bold text-white/50 mb-1.5">Hand log</div>
+      {ids.length ? ids.map((id) => hist[id].map((l, i) => <div key={`${id}-${i}`} className={i === 0 ? 'mt-1.5 text-white/40' : ''}>{l}</div>)) : 'No hands yet.'}
+    </aside>
   )
 }
 
@@ -222,10 +240,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           <div className="fixed inset-x-3 top-28 z-30 max-h-[45dvh] overflow-y-auto space-y-3 lg:static lg:inset-auto lg:z-auto lg:w-80 lg:shrink-0 lg:mt-12 lg:max-h-full">
             {board && <Leaderboard pub={pub} uid={uid} isOwner={isOwner} code={code} onClose={() => setBoard(false)} />}
             {logOpen && (
-              <aside className="glass p-3 text-xs font-mono text-white/70 max-h-64 overflow-y-auto" aria-live="polite">
-                <div className="text-[11px] font-sans font-bold text-white/50 mb-1.5">Hand log</div>
-                {pub.log.length ? pub.log.map((l, i) => <div key={i}>{l}</div>) : 'No hands yet.'}
-              </aside>
+              <HandLog handId={pub.handId} lines={pub.log} />
             )}
           </div>
         )}
@@ -289,6 +304,10 @@ function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engi
         <h2 className="text-lg font-bold">🏆 Leaderboard</h2>
         <button className="text-white/60 px-1" onClick={onClose} aria-label="Close">✕</button>
       </div>
+      <div className="flex justify-end gap-2.5 pr-0.5 text-[10px] uppercase tracking-wide text-white/40 num">
+        <span className="w-12 text-right">Total</span><span className="w-12 text-right">Net chips</span><span className="w-12 text-right">Profit</span>
+        {isOwner && <span className="w-5" />}
+      </div>
       <div className="divide-y divide-white/5">
         {pub.leaderboard.map((r, i) => (
           <div key={r.uid} className={`flex items-center gap-2.5 py-2.5 ${r.seated ? '' : 'opacity-50'}`}>
@@ -300,11 +319,10 @@ function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engi
                 {r.buyIns} buy-in{r.buyIns === 1 ? '' : 's'}{paid ? ` · ${money(r.paidCents)}` : ''}{!r.seated ? ' · left' : ''}
               </div>
             </div>
-            <div className="text-right shrink-0">
-              <div className="num font-bold text-sm">{r.stack.toLocaleString()}</div>
-              <div className={`num text-[11px] font-semibold ${tone(r.net)}`}>
-                {sign(r.net)}{r.net.toLocaleString()}{paid ? ` · ${money(r.netCents, true) || '$0'}` : ''}
-              </div>
+            <div className="flex shrink-0 text-right num text-xs gap-2.5">
+              <span className="w-12 font-bold text-sm">{r.stack.toLocaleString()}</span>
+              <span className={`w-12 font-semibold ${tone(r.net)}`}>{sign(r.net)}{r.net.toLocaleString()}</span>
+              <span className={`w-12 font-semibold ${paid ? tone(r.netCents) : 'text-white/30'}`}>{paid ? money(r.netCents, true) || '$0' : '–'}</span>
             </div>
             {isOwner && r.seated && r.uid !== uid && (
               <button className="text-white/40 hover:text-red-300 px-1 shrink-0" title={`Remove ${r.name}`} aria-label={`Remove ${r.name}`}
@@ -314,7 +332,6 @@ function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engi
         ))}
       </div>
       {!pub.leaderboard.length && <div className="text-white/50 text-sm">No players yet.</div>}
-      <p className="text-[11px] text-white/40 mt-3">Net = chips you hold now, plus chips cashed out, minus what you bought in.</p>
     </aside>
   )
 }

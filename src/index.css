@@ -151,7 +151,7 @@ select {
   --rail: linear-gradient(145deg, #f5d37a, #b8892b 55%, #6e4f12); --rail-glow: rgba(245,196,81,.18);
 }
 [data-table='neon'] {
-  --felt-a: #0f5a36; --felt-b: #04180e; --felt-line: rgba(253,224,71,.28);
+  --felt-a: #6fc63a; --felt-b: #14501c; --felt-line: rgba(253,224,71,.4);
   --rail: linear-gradient(120deg, #6ee7b7, #a3e635 50%, #fde047);
   --rail-glow: rgba(163,230,53,.3);
 }

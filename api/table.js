@@ -194203,7 +194203,7 @@ function dealStreet(state) {
   const n = street === "flop" ? 3 : 1;
   const dealt = Array.from({ length: n }, () => deck.pop());
   const board = [...state.board, ...dealt];
-  const players = state.players.map((p) => ({ ...p, bet: 0, acted: false, actedAtBet: -1 }));
+  const players = state.players.map((p) => ({ ...p, bet: 0, acted: false, actedAtBet: -1, lastAction: p.folded || p.allIn ? p.lastAction : "" }));
   return {
     ...state,
     players,
@@ -194276,7 +194276,7 @@ var AWAY_SIT_OUT_MS = 45e3;
 var NEXT_HAND_MS = 6e3;
 var NEXT_HAND_FOLD_MS = 3500;
 var BUSTED_MAX_MS = 5 * 6e4;
-var DEFAULT_TABLE_SETTINGS = { smallBlind: 10, bigBlind: 20, startStack: 2e3, buyInCents: 0, turnSecs: 20 };
+var DEFAULT_TABLE_SETTINGS = { smallBlind: 10, bigBlind: 20, startStack: 2e3, buyInCents: 0, turnSecs: 40 };
 var TableError = class extends Error {
 };
 var fail = (m2) => {
@@ -194308,8 +194308,12 @@ function contesting(t2, uid) {
 }
 function migrate(t2) {
   t2.settings.buyInCents ??= 0;
+  t2.settings.turnSecs = Math.max(t2.settings.turnSecs ?? 0, DEFAULT_TABLE_SETTINGS.turnSecs);
+  if (t2.pendingSettings) t2.pendingSettings.turnSecs = Math.max(t2.pendingSettings.turnSecs ?? 0, DEFAULT_TABLE_SETTINGS.turnSecs);
   if (t2.pendingSettings) t2.pendingSettings.buyInCents ??= 0;
   t2.actorUid ??= null;
+  t2.paused ??= false;
+  t2.pausedAt ??= null;
   for (const s2 of t2.seats) {
     if (!s2) continue;
     s2.afkHands ??= 0;
@@ -194337,6 +194341,8 @@ function createTable(code, ownerUid, settings, now) {
     nextHandAt: null,
     deadline: null,
     actorUid: null,
+    paused: false,
+    pausedAt: null,
     records: {},
     version: 0
   };
@@ -194459,6 +194465,26 @@ function setSitOut(t2, uid, out, now) {
     s2.timeouts = 0;
     s2.afkHands = 0;
     s2.idleSince = null;
+  }
+  touch(t2);
+}
+function setPaused(t2, uid, on, now) {
+  if (uid !== t2.ownerUid) fail("Only the table owner can pause");
+  if (on === t2.paused) return;
+  if (on) {
+    t2.paused = true;
+    t2.pausedAt = now;
+  } else {
+    const d = Math.max(0, now - (t2.pausedAt ?? now));
+    if (t2.deadline !== null) t2.deadline += d;
+    if (t2.nextHandAt !== null) t2.nextHandAt += d;
+    for (const s2 of t2.seats) {
+      if (!s2) continue;
+      s2.lastSeen += d;
+      if (s2.idleSince !== null) s2.idleSince += d;
+    }
+    t2.paused = false;
+    t2.pausedAt = null;
   }
   touch(t2);
 }
@@ -194586,6 +194612,7 @@ function startNextHand(t2, deck, now) {
   return true;
 }
 function tick(t2, now, deckFn) {
+  if (t2.paused) return false;
   const before = t2.version;
   for (let i2 = 0; i2 < MAX_SEATS; i2++) {
     const s2 = t2.seats[i2];
@@ -194697,6 +194724,8 @@ function publicView(t2, now) {
     legal: h2 && toAct >= 0 ? legalActions(h2, h2.toAct) : null,
     deadline: t2.deadline,
     nextHandAt: t2.nextHandAt,
+    paused: t2.paused,
+    pausedAt: t2.pausedAt,
     seats,
     result: res && h2 ? {
       showdown: res.showdown,
@@ -194869,6 +194898,9 @@ async function handle(uid, req, deps) {
           break;
         case "rename":
           rename(t2, uid, req.name);
+          break;
+        case "pause":
+          setPaused(t2, uid, !!req.on, now);
           break;
         case "act": {
           const kind = String(req.kind);

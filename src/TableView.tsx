@@ -8,6 +8,16 @@ import { hue, money } from './hue.ts'
 
 const DEAL_STEP = 110
 
+/** A queued action for when it becomes your turn. */
+export interface Premove {
+  handId: number
+  street: string
+  kind: 'checkfold' | 'checkcall' | 'raise'
+  raiseTo?: number
+  /** The bet in front of you when you queued it; a raise afterwards cancels call/check/raise premoves. */
+  facedBet: number
+}
+
 function useNow(ms: number) {
   const [n, setN] = useState(() => Date.now())
   useEffect(() => { const id = setInterval(() => setN(Date.now()), ms); return () => clearInterval(id) }, [ms])
@@ -45,6 +55,8 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   const now = useNow(250)
   const serverNow = now + live.offset
   const [busy, setBusy] = useState(false)
+  const [pre, setPre] = useState<Premove | null>(null)
+  const fired = useRef('')
   const [msg, setMsg] = useState('')
 
   // ----- animation gate: animate a hand only if we saw it start while the page was open -----
@@ -131,6 +143,26 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
   const myPub = mySeat >= 0 ? pub.seats[mySeat] : null
   const myTurn = !!myPub && pub.toAct === mySeat && pub.phase === 'betting'
+  // A queued move disappears when the hand moves on, or when someone raises after you queued a call/check/raise.
+  const activePre = pre && pre.handId === pub.handId && pre.street === pub.street && (pre.kind === 'checkfold' || pre.facedBet === pub.currentBet) ? pre : null
+  useEffect(() => {
+    if (!myTurn || !activePre || !pub.legal) return
+    const key = `${pub.handId}:${pub.seq}`
+    if (fired.current === key) return
+    fired.current = key
+    const lg = pub.legal
+    let kind = ''
+    let raiseTo: number | undefined
+    if (activePre.kind === 'checkfold') kind = lg.canCheck ? 'check' : 'fold'
+    else if (activePre.kind === 'checkcall') kind = lg.canCheck ? 'check' : 'call'
+    else if (lg.canRaise && activePre.raiseTo !== undefined && activePre.raiseTo >= lg.minRaiseTo && activePre.raiseTo <= lg.maxRaiseTo) {
+      kind = activePre.raiseTo >= lg.maxRaiseTo ? 'allin' : 'raise'
+      raiseTo = activePre.raiseTo
+    }
+    setPre(null)
+    if (kind) void send('act', { handId: pub.handId, seq: pub.seq, kind, raiseTo })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myTurn, pub.seq, pub.handId])
   const holeOk = live.hole && live.hole.handId === pub.handId ? live.hole.cards : null
   const boardY = cy + 0.02 * h
   const potSpot = { x: cx, y: boardY - boardCw * 0.7 - 22 }
@@ -160,7 +192,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
         {/* centre: pot, deck, board */}
         <div className="absolute" style={{ left: potSpot.x, top: potSpot.y, transform: 'translate(-50%, -50%)' }}>
-          <PotDisplay amount={pub.pot} />
+          <PotDisplay amount={pub.phase === 'betting' ? pub.pot - pub.seats.reduce((a, s) => a + (s?.bet ?? 0), 0) : pub.pot} />
         </div>
         <div className="absolute" style={{ left: deck.x, top: deck.y, transform: 'translate(-50%, -50%)' }}>
           {[2, 1, 0].map((i) => <div key={i} className="absolute" style={{ left: -boardCw / 2 + i * 1.5, top: -boardCw * 0.7 - i * 1.5 }}><PlayingCard faceUp={false} width={boardCw} /></div>)}
@@ -284,7 +316,10 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
       {/* actions */}
       <div className="flex-none min-h-[72px]">
         {myPub && myTurn && pub.legal ? (
-          <ActionBar key={`${pub.handId}-${pub.seq}`} pub={pub} myStack={myPub.stack} busy={busy} onAct={act} />
+          <ActionBar key={`${pub.handId}-${pub.seq}`} pub={pub} lg={pub.legal} myStack={myPub.stack} busy={busy} onAct={act} />
+        ) : myPub && pub.phase === 'betting' && myPub.inHand && !myPub.folded && !myPub.allIn && myPub.stack > 0 ? (
+          <ActionBar key={`pre-${pub.handId}-${pub.street}-${pub.currentBet}`} pub={pub} myStack={myPub.stack} myBet={myPub.bet} busy={false} premove={activePre}
+            onAct={(kind, raiseTo) => setPre(activePre && activePre.kind === kind && activePre.raiseTo === raiseTo ? null : { handId: pub.handId, street: pub.street, kind: kind as Premove['kind'], raiseTo, facedBet: pub.currentBet })} />
         ) : myPub && myPub.stack === 0 && !(myPub.inHand && !myPub.folded && pub.phase === 'betting') ? (
           <div className="text-center space-y-2">
             <div className="text-white/80">{myPub.status === 'busted' ? "You're out of chips." : ''}</div>
@@ -310,8 +345,28 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   )
 }
 
-function ActionBar({ pub, myStack, busy, onAct }: { pub: PublicTable; myStack: number; busy: boolean; onAct: (k: string, r?: number) => void }) {
-  const lg = pub.legal!
+function ActionBar({ pub, lg: realLg, myStack, myBet = 0, busy, premove, onAct }: {
+  pub: PublicTable
+  /** The server's legal actions on your turn; absent while queuing a premove. */
+  lg?: NonNullable<PublicTable['legal']>
+  myStack: number
+  myBet?: number
+  busy: boolean
+  premove?: Premove | null
+  onAct: (k: string, r?: number) => void
+}) {
+  const pre = realLg === undefined
+  // Not your turn: work out the same limits locally from public info.
+  const owed = Math.max(0, pub.currentBet - myBet)
+  const localMax = myBet + myStack
+  const lg = realLg ?? {
+    canCheck: owed === 0,
+    callAmount: Math.min(owed, myStack),
+    canRaise: myStack > owed,
+    minRaiseTo: Math.min(pub.currentBet + pub.minRaise, localMax),
+    maxRaiseTo: localMax,
+    canAllIn: myStack > 0,
+  }
   const [raising, setRaising] = useState(false)
   const [amount, setAmount] = useState(String(lg.minRaiseTo))
   const verb = pub.currentBet === 0 ? 'Bet' : 'Raise'
@@ -331,16 +386,38 @@ function ActionBar({ pub, myStack, busy, onAct }: { pub: PublicTable; myStack: n
   const btn = 'rounded-xl px-4 py-3 font-bold text-sm sm:text-base transition active:scale-95 disabled:opacity-40'
   const preset = 'rounded-lg bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs font-semibold'
   const slider = Math.min(lg.maxRaiseTo, Math.max(lg.minRaiseTo, isInt ? parsed : lg.minRaiseTo))
+  // Queued moves look greyed out; the one you picked lights up.
+  const grey = (on: boolean) => (on ? 'bg-white/25 text-white ring-2 ring-white' : 'bg-white/10 text-white/70 hover:bg-white/15')
+  const callLabel = lg.canCheck ? 'Check' : `Call ${lg.callAmount.toLocaleString()}${lg.callAmount >= myStack ? ' (all-in)' : ''}`
+  const raiseSelected = premove?.kind === 'raise'
+  const confirmRaise = () => {
+    onAct(allIn ? 'allin' : 'raise', parsed)
+    if (pre) setRaising(false)
+  }
   return (
     <div className="relative space-y-2">
       <div className="flex gap-2 justify-center flex-wrap">
-        <button className={`${btn} bg-rose-600`} disabled={busy} onClick={() => onAct('fold')}>Fold</button>
-        {lg.canCheck
-          ? <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => onAct('check')}>Check</button>
-          : <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => onAct('call')}>Call {lg.callAmount.toLocaleString()}{lg.callAmount >= myStack ? ' (all-in)' : ''}</button>}
-        {lg.canRaise
-          ? <button className={`${btn} ${raising ? 'bg-amber-300' : 'bg-amber-500'} text-black`} disabled={busy} onClick={() => setRaising((v) => !v)}>{raising ? 'Cancel' : verb}</button>
-          : lg.canAllIn && !lg.canCheck && lg.callAmount < myStack ? <button className={`${btn} bg-violet-600`} disabled={busy} onClick={() => onAct('allin')}>All-in</button> : null}
+        {pre ? (
+          <>
+            <button className={`${btn} ${grey(premove?.kind === 'checkfold')}`} onClick={() => onAct('checkfold')}>Check/Fold</button>
+            <button className={`${btn} ${grey(premove?.kind === 'checkcall')}`} onClick={() => onAct('checkcall')}>{callLabel}</button>
+            {lg.canRaise && (
+              <button className={`${btn} ${grey(raiseSelected || raising)}`} onClick={() => setRaising((v) => !v)}>
+                {raiseSelected ? `${verb} to ${premove?.raiseTo?.toLocaleString()}` : verb}
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <button className={`${btn} bg-rose-600`} disabled={busy} onClick={() => onAct('fold')}>Fold</button>
+            {lg.canCheck
+              ? <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => onAct('check')}>Check</button>
+              : <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => onAct('call')}>{callLabel}</button>}
+            {lg.canRaise
+              ? <button className={`${btn} ${raising ? 'bg-amber-300' : 'bg-amber-500'} text-black`} disabled={busy} onClick={() => setRaising((v) => !v)}>{raising ? 'Cancel' : verb}</button>
+              : lg.canAllIn && !lg.canCheck && lg.callAmount < myStack ? <button className={`${btn} bg-violet-600`} disabled={busy} onClick={() => onAct('allin')}>All-in</button> : null}
+          </>
+        )}
       </div>
       {raising && lg.canRaise && (
         <div className="glass p-3 space-y-2 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-[min(92vw,28rem)] z-20" style={{ background: 'rgba(16,20,32,.97)' }}>
@@ -356,7 +433,7 @@ function ActionBar({ pub, myStack, busy, onAct }: { pub: PublicTable; myStack: n
           <div className="flex items-center gap-2 justify-center">
             <input type="number" inputMode="numeric" className="w-32 rounded-lg bg-black/40 border border-white/20 px-3 py-2 num text-center font-bold" value={amount} min={lg.minRaiseTo} max={lg.maxRaiseTo} step={bb}
               onChange={(e) => setAmount(e.target.value)} aria-label={`${verb} amount`} />
-            <button className={`${btn} bg-gradient-to-r from-emerald-400 to-yellow-300 text-black`} disabled={busy || !valid} onClick={() => onAct(allIn ? 'allin' : 'raise', parsed)}>
+            <button className={`${btn} bg-amber-500 text-black`} disabled={busy || !valid} onClick={confirmRaise}>
               {allIn ? 'All-in' : `${verb} to`} {valid ? parsed.toLocaleString() : ''}
             </button>
           </div>
