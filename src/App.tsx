@@ -269,7 +269,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   )
 }
 
-type HistoryData = { entries: { at: number; lines: string[] }[]; leaderboard: import('./engine/table.ts').PublicTable['leaderboard']; settings: import('./engine/table.ts').PublicTable['settings'] }
+type HistoryData = { final: import('./engine/table.ts').PublicTable | null; entries: { at: number; lines: string[] }[]; leaderboard: import('./engine/table.ts').PublicTable['leaderboard']; settings: import('./engine/table.ts').PublicTable['settings'] }
 
 /** Host-only record of everything that happened at the table, kept for a month. */
 function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
@@ -336,6 +336,7 @@ function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
 
 function PastTables() {
   const [tables, setTables] = useState<{ code: string; at: number }[]>([])
+  const [open, setOpen] = useState<string | null>(null)
   useEffect(() => {
     let live = true
     void api('myTables').then((r) => { if (live && r.ok) setTables((r as unknown as { tables: { code: string; at: number }[] }).tables ?? []) })
@@ -346,12 +347,52 @@ function PastTables() {
     <div className="glass p-5 space-y-2">
       <h2 className="font-bold">Your past tables</h2>
       {tables.map((x) => (
-        <a key={x.code} href={`#${x.code}`} className="flex justify-between rounded-xl px-3 py-2 bg-white/5 hover:bg-white/10">
+        <button key={x.code} onClick={() => setOpen(x.code)} className="w-full flex justify-between rounded-xl px-3 py-2 bg-white/5 hover:bg-white/10">
           <span className="font-mono font-bold tracking-widest">{x.code}</span>
           <span className="text-white/50 text-sm">{new Date(x.at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
-        </a>
+        </button>
       ))}
+      {open && <PastTable code={open} onClose={() => setOpen(null)} />}
     </div>
+  )
+}
+
+/** A finished table: history and final standings only. There is no way to join from here. */
+function PastTable({ code, onClose }: { code: string; onClose: () => void }) {
+  const [view, setView] = useState<'menu' | 'history' | 'final'>('menu')
+  const [final, setFinal] = useState<{ pub: import('./engine/table.ts').PublicTable | null } | null>(null)
+  const openFinal = () => {
+    setView('final')
+    void api('history', { code }).then((r) => setFinal({ pub: r.ok ? (r as unknown as { history: HistoryData }).history.final : null }))
+  }
+  if (view === 'history') return <HistoryCard code={code} onClose={onClose} />
+  if (view === 'final') {
+    return (
+      <div className="fixed inset-0 z-30 bg-black/80 backdrop-blur-sm flex flex-col p-4" onClick={onClose}>
+        <div className="flex items-center justify-between mb-2" onClick={(e) => e.stopPropagation()}>
+          <h2 className="text-lg font-bold">Final standings · {code}</h2>
+          <button className="text-white/60 px-2" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="flex-1 min-h-0" onClick={(e) => e.stopPropagation()}>
+          {!final && <div className="text-white/60 text-sm">Loading…</div>}
+          {final && !final.pub && <div className="text-white/60 text-sm">No final screen was saved for this table.</div>}
+          {final?.pub && (
+            <TableView code={code} uid="" live={{ status: 'ready', pub: final.pub, hole: null, offset: 0, fromCache: false }} mySeat={-1} readOnly
+              tableTheme={lsGet(THEME_KEY) ?? 'classic'} deckStyle={lsGet(DECK_KEY) ?? 'indigo'} fourColour={lsGet(FACES_KEY) === '1'} onPickSeat={() => {}} />
+          )}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-lg font-bold mb-3 font-mono tracking-widest">{code}</h2>
+      <div className="grid gap-2">
+        <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setView('history')}>History</button>
+        <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={openFinal}>Final standings</button>
+        <button className="rounded-xl px-4 py-2 text-white/60" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
   )
 }
 

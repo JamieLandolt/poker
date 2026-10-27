@@ -47,9 +47,11 @@ interface Props {
   tableTheme: string
   deckStyle: string
   fourColour: boolean
+  /** Static display (past table): no seats to pick, no actions. */
+  readOnly?: boolean
 }
 
-export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTheme, deckStyle, fourColour }: Props) {
+export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTheme, deckStyle, fourColour, readOnly }: Props) {
   const pub = live.pub as PublicTable
   const { ref, w, h } = useSize()
   const now = useNow(250)
@@ -252,7 +254,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           const p = pos(i)
           const s = seatsView[i]
           if (!s) {
-            if (mySeat >= 0) return null
+            if (mySeat >= 0 || readOnly) return null
             return (
               <button key={i} className="seat glass !w-auto px-3 py-2 text-xs text-white/70 hover:text-white hover:border-white/40" style={{ left: p.x, top: p.y }} onClick={() => onPickSeat(i)}>
                 + Sit
@@ -343,7 +345,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
       </div>
 
       {/* actions */}
-      <div className="flex-none min-h-[72px]">
+      {!readOnly && <div className="flex-none min-h-[72px]">
         {myPub && pub.phase === 'handOver' && myPub.inHand && !myPub.cards && holeOk && (
           <div className="text-center mb-1">
             <button className="rounded-xl px-5 py-2 font-semibold bg-white/10 hover:bg-white/15" disabled={busy} onClick={() => send('show')}>Show cards</button>
@@ -373,7 +375,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           </div>
         )}
         {msg && <div className="text-center text-xs text-red-300 mt-1">{msg}</div>}
-      </div>
+      </div>}
 
     </div>
   )

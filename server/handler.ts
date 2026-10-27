@@ -93,7 +93,7 @@ export async function handle(uid: string, req: Request, deps: HandlerDeps): Prom
       if (uid !== t.creatorUid && uid !== t.ownerUid) return { ok: false, error: 'Only the host can see the history' }
       const entries = await deps.store.ledger(code, now - HISTORY_MS)
       const pv = publicView(migrate(t), now)
-      return { ok: true, history: { entries, leaderboard: pv.leaderboard, settings: pv.settings } }
+      return { ok: true, history: { entries, leaderboard: pv.leaderboard, settings: pv.settings, final: t.finalSnap ?? null } }
     }
 
     if (req.type === 'ping') {

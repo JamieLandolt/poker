@@ -194275,6 +194275,7 @@ var GRACE_MS = 1e3;
 var AWAY_SIT_OUT_MS = 45e3;
 var NEXT_HAND_MS = 6e3;
 var NEXT_HAND_FOLD_MS = 3500;
+var AFK_KICK_MS = 30 * 6e4;
 var BUSTED_MAX_MS = 5 * 6e4;
 var DEFAULT_TABLE_SETTINGS = { smallBlind: 10, bigBlind: 20, startStack: 2e3, buyInCents: 0, turnSecs: 40 };
 var TableError = class extends Error {
@@ -194318,6 +194319,8 @@ function migrate(t2) {
   t2.ledger ??= [];
   t2.ledgerHandLen ??= 0;
   t2.shown ??= [];
+  t2.handTouched ??= false;
+  t2.finalSnap ??= null;
   for (const s2 of t2.seats) {
     if (!s2) continue;
     s2.afkHands ??= 0;
@@ -194339,6 +194342,8 @@ function createTable(code, ownerUid, settings, now) {
     ledger: [],
     ledgerHandLen: 0,
     shown: [],
+    handTouched: false,
+    finalSnap: null,
     settings,
     pendingSettings: null,
     seats: Array(MAX_SEATS).fill(null),
@@ -194478,9 +194483,11 @@ function setSitOut(t2, uid, out, now) {
   if (out && s2.status !== "sitOut") note(t2, `${s2.name} goes AFK`);
   if (!out && s2.status === "sitOut") note(t2, `${s2.name} is back`);
   if (out) {
+    if (s2.status !== "sitOut") {
+      s2.idleSince = now;
+      s2.afkHands = 0;
+    }
     s2.status = "sitOut";
-    s2.idleSince = now;
-    s2.afkHands = 0;
     const hi = handIdx(t2, uid);
     if (t2.phase === "betting" && t2.hand && hi >= 0 && !t2.hand.players[hi].folded && !t2.hand.players[hi].allIn) {
       t2.hand = foldOut(t2.hand, hi);
@@ -194552,6 +194559,7 @@ function act(t2, uid, a, now) {
   const next = applyAction(t2.hand, { ...a, seat: hi });
   if (next === t2.hand) return false;
   t2.hand = next;
+  t2.handTouched = true;
   const s2 = t2.seats[seatOf(t2, uid)];
   if (s2) {
     s2.timeouts = 0;
@@ -194606,6 +194614,7 @@ function onHandOver(t2, now) {
     }
   }
   note(t2, stacksLine(t2));
+  if (t2.handTouched) t2.finalSnap = { ...JSON.parse(JSON.stringify(publicView(t2, now))), log: [] };
 }
 function eligibleSeats(t2) {
   const out = [];
@@ -194655,6 +194664,7 @@ function startNextHand(t2, deck, now) {
   for (const s2 of seats) t2.seats[s2].stack = t2.hand.players.find((p) => p.seat === s2).stack;
   t2.ledgerHandLen = 0;
   t2.shown = [];
+  t2.handTouched = false;
   afterHandChange(t2, now, true);
   return true;
 }
@@ -194666,6 +194676,11 @@ function tick(t2, now, deckFn) {
     if (!s2) continue;
     const away = now - s2.lastSeen;
     if (away > AWAY_SIT_OUT_MS && s2.status === "active") setSitOut(t2, s2.uid, true, now);
+    if (s2.status === "sitOut" && s2.idleSince !== null && now - s2.idleSince > AFK_KICK_MS && !contesting(t2, s2.uid)) {
+      note(t2, `${s2.name} removed after 30 minutes AFK`);
+      leave(t2, s2.uid, now);
+      continue;
+    }
     if (s2.status === "busted" && s2.idleSince !== null && now - s2.idleSince > BUSTED_MAX_MS && !contesting(t2, s2.uid)) leave(t2, s2.uid, now);
   }
   if (t2.phase === "betting" && t2.hand && t2.deadline !== null && now > t2.deadline + GRACE_MS) {
@@ -194679,10 +194694,11 @@ function tick(t2, now, deckFn) {
         const s2 = t2.seats[seatOf(t2, h2.players[idx].uid)];
         if (s2) {
           s2.timeouts++;
-          if (s2.timeouts >= 2 && s2.status === "active") {
+          if (s2.status === "active") {
             s2.status = "sitOut";
             s2.idleSince = now;
-            note(t2, `${s2.name} goes AFK`);
+            s2.afkHands = 0;
+            note(t2, `${s2.name} goes AFK (timed out)`);
           }
         }
         afterHandChange(t2, now, true);
@@ -194949,7 +194965,7 @@ async function handle(uid, req, deps) {
       if (uid !== t2.creatorUid && uid !== t2.ownerUid) return { ok: false, error: "Only the host can see the history" };
       const entries = await deps.store.ledger(code, now - HISTORY_MS);
       const pv = publicView(migrate(t2), now);
-      return { ok: true, history: { entries, leaderboard: pv.leaderboard, settings: pv.settings } };
+      return { ok: true, history: { entries, leaderboard: pv.leaderboard, settings: pv.settings, final: t2.finalSnap ?? null } };
     }
     if (req.type === "ping") {
       await deps.store.ping(code, uid, now);

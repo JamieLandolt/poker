@@ -9,6 +9,8 @@ export const AWAY_SIT_OUT_MS = 45_000
 export const AWAY_LEAVE_MS = 120_000
 export const NEXT_HAND_MS = 6000
 export const NEXT_HAND_FOLD_MS = 3500
+/** An AFK player is removed (and cashed out) after this long. */
+export const AFK_KICK_MS = 30 * 60_000
 export const BUSTED_MAX_MS = 5 * 60_000
 
 export interface TableSettings {
@@ -66,6 +68,10 @@ export interface Table {
   ledgerHandLen: number
   /** Players who chose to show their cards after the hand. */
   shown: string[]
+  /** A player (not a timeout) acted in the current hand. */
+  handTouched: boolean
+  /** The table screen after the last hand where someone actually acted. */
+  finalSnap: PublicTable | null
   settings: TableSettings
   /** Applied at the start of the next hand. */
   pendingSettings: TableSettings | null
@@ -138,6 +144,8 @@ export function migrate(t: Table): Table {
   t.ledger ??= []
   t.ledgerHandLen ??= 0
   t.shown ??= []
+  t.handTouched ??= false
+  t.finalSnap ??= null
   for (const s of t.seats) {
     if (!s) continue
     s.afkHands ??= 0
@@ -154,7 +162,7 @@ export function createTable(code: string, ownerUid: string, settings: TableSetti
   validateSettings(settings)
   void now
   const t: Table = {
-    code, ownerUid, creatorUid: ownerUid, ledger: [], ledgerHandLen: 0, shown: [], settings, pendingSettings: null, seats: Array(MAX_SEATS).fill(null), button: -1,
+    code, ownerUid, creatorUid: ownerUid, ledger: [], ledgerHandLen: 0, shown: [], handTouched: false, finalSnap: null, settings, pendingSettings: null, seats: Array(MAX_SEATS).fill(null), button: -1,
     handCount: 0, phase: 'waiting', hand: null, nextHandAt: null, deadline: null, actorUid: null, paused: false, pausedAt: null, records: {}, version: 0,
   }
   note(t, `Table ${code} created, blinds ${n(settings.smallBlind)}/${n(settings.bigBlind)}, ${n(settings.startStack)} chips per buy-in${settings.buyInCents ? ` at $${(settings.buyInCents / 100).toFixed(2)}` : ''}`)
@@ -283,9 +291,8 @@ export function setSitOut(t: Table, uid: string, out: boolean, now: number): voi
   if (out && s.status !== 'sitOut') note(t, `${s.name} goes AFK`)
   if (!out && s.status === 'sitOut') note(t, `${s.name} is back`)
   if (out) {
+    if (s.status !== 'sitOut') { s.idleSince = now; s.afkHands = 0 }
     s.status = 'sitOut'
-    s.idleSince = now
-    s.afkHands = 0
     // Sitting out mid-hand folds you unless you are all-in.
     const hi = handIdx(t, uid)
     if (t.phase === 'betting' && t.hand && hi >= 0 && !t.hand.players[hi].folded && !t.hand.players[hi].allIn) {
@@ -366,6 +373,7 @@ export function act(t: Table, uid: string, a: { handId: number; seq: number; kin
   const next = applyAction(t.hand, { ...a, seat: hi })
   if (next === t.hand) return false // stale or illegal: ignored
   t.hand = next
+  t.handTouched = true
   const s = t.seats[seatOf(t, uid)]
   if (s) { s.timeouts = 0; s.lastSeen = now }
   afterHandChange(t, now, true)
@@ -420,6 +428,7 @@ function onHandOver(t: Table, now: number) {
     if (s.stack === 0) { s.status = 'busted'; s.idleSince = now; note(t, `${s.name} is out of chips`) }
   }
   note(t, stacksLine(t))
+  if (t.handTouched) t.finalSnap = { ...JSON.parse(JSON.stringify(publicView(t, now))), log: [] }
 }
 
 /** Seats that will be dealt into the next hand, in seat order. */
@@ -469,6 +478,7 @@ function startNextHand(t: Table, deck: Card[], now: number): boolean {
   for (const s of seats) t.seats[s]!.stack = t.hand.players.find((p) => p.seat === s)!.stack
   t.ledgerHandLen = 0
   t.shown = []
+  t.handTouched = false
   afterHandChange(t, now, true)
   return true
 }
@@ -487,6 +497,11 @@ export function tick(t: Table, now: number, deckFn: () => Card[]): boolean {
     const away = now - s.lastSeen
     // A disconnected active player is moved to AFK (keeps the seat for a few hands in case they come back).
     if (away > AWAY_SIT_OUT_MS && s.status === 'active') setSitOut(t, s.uid, true, now)
+    if (s.status === 'sitOut' && s.idleSince !== null && now - s.idleSince > AFK_KICK_MS && !contesting(t, s.uid)) {
+      note(t, `${s.name} removed after 30 minutes AFK`)
+      leave(t, s.uid, now)
+      continue
+    }
     if (s.status === 'busted' && s.idleSince !== null && now - s.idleSince > BUSTED_MAX_MS && !contesting(t, s.uid)) leave(t, s.uid, now)
   }
   // 2. turn timeout
@@ -501,7 +516,7 @@ export function tick(t: Table, now: number, deckFn: () => Card[]): boolean {
         const s = t.seats[seatOf(t, h.players[idx].uid)]
         if (s) {
           s.timeouts++
-          if (s.timeouts >= 2 && s.status === 'active') { s.status = 'sitOut'; s.idleSince = now; note(t, `${s.name} goes AFK`) }
+          if (s.status === 'active') { s.status = 'sitOut'; s.idleSince = now; s.afkHands = 0; note(t, `${s.name} goes AFK (timed out)`) }
         }
         afterHandChange(t, now, true)
       }

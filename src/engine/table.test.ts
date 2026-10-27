@@ -3,7 +3,7 @@ import { newDeck, shuffle, type Card, type Rng } from './cards.ts'
 import { legalActions } from './game.ts'
 import {
   act, chipCheck, createTable, migrate, setPaused, DEFAULT_TABLE_SETTINGS, holeCards, kick, leave, publicView, rebuy, seatOf,
-  setSitOut, showHand, sit, tick, TableError, type Table, AWAY_LEAVE_MS, GRACE_MS,
+  setSitOut, showHand, sit, tick, TableError, type Table, AWAY_LEAVE_MS, AFK_KICK_MS, GRACE_MS,
 } from './table.ts'
 
 function seeded(seed: number): Rng {
@@ -118,13 +118,14 @@ describe('hand flow', () => {
     expect(seatOf(t, a)).toBe(-1)
     check(t)
   })
-  it('a timed-out player is checked or folded, and two timeouts sit them out', () => {
+  it('a timed-out player is checked or folded, and and are sat out as AFK', () => {
     const { t, now, d } = setup(3)
     let clock = now
     const first = actor(t)
     clock = t.deadline! + GRACE_MS + 1
     tick(t, clock, d)
     expect(t.seats[seatOf(t, first)]!.timeouts).toBe(1)
+    expect(t.seats[seatOf(t, first)]!.status).toBe('sitOut')
     expect(t.hand!.players.find((p) => p.uid === first)!.folded).toBe(true)
     check(t)
   })
@@ -194,7 +195,7 @@ describe('money ratio', () => {
 })
 
 describe('AFK', () => {
-  it('an away player keeps the seat indefinitely and is not dealt in', () => {
+  it('an away player keeps the seat for 30 minutes and is not dealt in', () => {
     const rng = seeded(5)
     const d = deck(rng)
     const t = createTable('ABCDE', 'u0', S, 0)
@@ -214,12 +215,14 @@ describe('AFK', () => {
     }
     expect(seatOf(t, 'u2')).toBeGreaterThanOrEqual(0)
     expect(publicView(t, now).seats[2]!.afkMissed).toBeGreaterThan(20)
-    // far in the future, still held
-    for (const x of t.seats) if (x) x.lastSeen = now + 5 * 24 * 3600_000
-    tick(t, now + 5 * 24 * 3600_000, d)
+    // still held just before 30 minutes, removed after
+    const afkSince = t.seats[2]!.idleSince!
+    for (const x of t.seats) if (x) x.lastSeen = afkSince + AFK_KICK_MS - 1000
+    tick(t, afkSince + AFK_KICK_MS - 1000, d)
     expect(seatOf(t, 'u2')).toBeGreaterThanOrEqual(0)
-    setSitOut(t, 'u2', false, now)
-    expect(t.seats[2]!.status).toBe('active')
+    for (const x of t.seats) if (x) x.lastSeen = afkSince + AFK_KICK_MS + 1000
+    tick(t, afkSince + AFK_KICK_MS + 1000, d)
+    expect(seatOf(t, 'u2')).toBe(-1)
     check(t)
   })
   it('the host can remove an away player', () => {
@@ -396,8 +399,8 @@ describe('property: chaos', () => {
     const { t, now, d } = setup(3)
     tick(t, now + AWAY_LEAVE_MS + 10, d)
     expect(t.seats.filter((x) => x?.status === 'sitOut').length).toBeGreaterThan(0)
-    for (const x of t.seats) if (x) x.lastSeen = now + 40 * 60_000
-    tick(t, now + 40 * 60_000, d)
+    for (const x of t.seats) if (x) x.lastSeen = now + 10 * 60_000
+    tick(t, now + 10 * 60_000, d)
     expect(t.seats.filter(Boolean).length).toBe(3)
     check(t)
   })
@@ -465,5 +468,19 @@ describe('showing cards', () => {
     showHand(t, a)
     expect(publicView(t, now).seats.find((x) => x?.uid === a)!.cards).toHaveLength(2)
     expect(t.ledger.some((l) => l.includes('shows'))).toBe(true)
+  })
+})
+
+describe('final standings snapshot', () => {
+  it('is saved after a hand someone acted in, not after a pure timeout', () => {
+    const a = setup(2)
+    const after = a.now + 1000 * (S.turnSecs + 5)
+    tick(a.t, after, a.d) // timeout fold: nobody acted
+    expect(a.t.phase).toBe('handOver')
+    expect(a.t.finalSnap).toBeNull()
+    const b = setup(2, seeded(5))
+    act(b.t, actor(b.t), { handId: b.t.hand!.handId, seq: b.t.hand!.seq, kind: 'fold' }, b.now)
+    expect(b.t.finalSnap?.phase).toBe('handOver')
+    expect(b.t.finalSnap?.seats.filter(Boolean)).toHaveLength(2)
   })
 })
