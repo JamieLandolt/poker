@@ -344,6 +344,7 @@ function PastTables() {
   }, [])
   if (!tables.length) return null
   return (
+    <>
     <div className="glass p-5 space-y-2">
       <h2 className="font-bold">Your past tables</h2>
       {tables.map((x) => (
@@ -352,8 +353,9 @@ function PastTables() {
           <span className="text-white/50 text-sm">{new Date(x.at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
         </button>
       ))}
-      {open && <PastTable code={open} onClose={() => setOpen(null)} />}
     </div>
+    {open && <PastTable code={open} onClose={() => setOpen(null)} />}
+    </>
   )
 }
 
