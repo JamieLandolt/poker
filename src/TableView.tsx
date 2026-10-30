@@ -354,9 +354,9 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           </div>
         )}
         {myPub && myTurn && pub.legal ? (
-          <ActionBar key={`${pub.handId}-${pub.seq}`} pub={pub} lg={pub.legal} myStack={myPub.stack} busy={busy} onAct={act} />
+          <ActionBar key={`bar-${pub.handId}-${pub.street}`} pub={pub} lg={pub.legal} myStack={myPub.stack} busy={busy} onAct={act} />
         ) : myPub && pub.phase === 'betting' && myPub.inHand && !myPub.folded && !myPub.allIn && myPub.stack > 0 ? (
-          <ActionBar key={`pre-${pub.handId}-${pub.street}-${pub.currentBet}`} pub={pub} myStack={myPub.stack} myBet={myPub.bet} busy={false} premove={activePre}
+          <ActionBar key={`bar-${pub.handId}-${pub.street}`} pub={pub} myStack={myPub.stack} myBet={myPub.bet} busy={false} premove={activePre}
             onAct={(kind, raiseTo) => setPre(activePre && activePre.kind === kind && activePre.raiseTo === raiseTo ? null : { handId: pub.handId, street: pub.street, kind: kind as Premove['kind'], raiseTo, facedBet: pub.currentBet })} />
         ) : myPub && myPub.stack === 0 && !(myPub.inHand && !myPub.folded && pub.phase === 'betting') ? (
           <div className="text-center space-y-2">
@@ -405,6 +405,7 @@ function ActionBar({ pub, lg: realLg, myStack, myBet = 0, busy, premove, onAct }
     canAllIn: myStack > 0,
   }
   const [raising, setRaising] = useState(false)
+  const go = (k: string, r?: number) => { setRaising(false); onAct(k, r) }
   const [amount, setAmount] = useState(String(lg.minRaiseTo))
   const verb = pub.currentBet === 0 ? 'Bet' : 'Raise'
   const parsed = Number(amount)
@@ -428,16 +429,15 @@ function ActionBar({ pub, lg: realLg, myStack, myBet = 0, busy, premove, onAct }
   const callLabel = lg.canCheck ? 'Check' : `Call ${lg.callAmount.toLocaleString()}${lg.callAmount >= myStack ? ' (all-in)' : ''}`
   const raiseSelected = premove?.kind === 'raise'
   const confirmRaise = () => {
-    onAct(allIn ? 'allin' : 'raise', parsed)
-    if (pre) setRaising(false)
+    go(allIn ? 'allin' : 'raise', parsed)
   }
   return (
     <div className="relative space-y-2">
       <div className="flex gap-2 justify-center flex-wrap">
         {pre ? (
           <>
-            <button className={`${btn} ${grey(premove?.kind === 'checkfold')}`} onClick={() => onAct('checkfold')}>Check/Fold</button>
-            <button className={`${btn} ${grey(premove?.kind === 'checkcall')}`} onClick={() => onAct('checkcall')}>{callLabel}</button>
+            <button className={`${btn} ${grey(premove?.kind === 'checkfold')}`} onClick={() => go('checkfold')}>Check/Fold</button>
+            <button className={`${btn} ${grey(premove?.kind === 'checkcall')}`} onClick={() => go('checkcall')}>{callLabel}</button>
             {lg.canRaise && (
               <button className={`${btn} ${grey(raiseSelected || raising)}`} onClick={() => setRaising((v) => !v)}>
                 {raiseSelected ? `${verb} to ${premove?.raiseTo?.toLocaleString()}` : verb}
@@ -446,13 +446,13 @@ function ActionBar({ pub, lg: realLg, myStack, myBet = 0, busy, premove, onAct }
           </>
         ) : (
           <>
-            <button className={`${btn} bg-rose-600`} disabled={busy} onClick={() => onAct('fold')}>Fold</button>
+            <button className={`${btn} bg-rose-600`} disabled={busy} onClick={() => go('fold')}>Fold</button>
             {lg.canCheck
-              ? <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => onAct('check')}>Check</button>
-              : <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => onAct('call')}>{callLabel}</button>}
+              ? <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => go('check')}>Check</button>
+              : <button className={`${btn} bg-sky-600`} disabled={busy} onClick={() => go('call')}>{callLabel}</button>}
             {lg.canRaise
               ? <button className={`${btn} ${raising ? 'bg-amber-300' : 'bg-amber-500'} text-black`} disabled={busy} onClick={() => setRaising((v) => !v)}>{raising ? 'Cancel' : verb}</button>
-              : lg.canAllIn && !lg.canCheck && lg.callAmount < myStack ? <button className={`${btn} bg-violet-600`} disabled={busy} onClick={() => onAct('allin')}>All-in</button> : null}
+              : lg.canAllIn && !lg.canCheck && lg.callAmount < myStack ? <button className={`${btn} bg-violet-600`} disabled={busy} onClick={() => go('allin')}>All-in</button> : null}
           </>
         )}
       </div>
