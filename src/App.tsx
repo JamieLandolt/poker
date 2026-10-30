@@ -123,7 +123,7 @@ function HandLog({ handId, lines }: { handId: number; lines: string[] }) {
   const ids = Object.keys(hist).map(Number).sort((a, b) => a - b).slice(-2)
   useEffect(() => { box.current?.scrollTo({ top: box.current.scrollHeight }) }, [hist])
   return (
-    <aside ref={box} className="glass p-3 text-xs font-mono text-white/70 max-h-64 overflow-y-auto" aria-live="polite">
+    <aside ref={box} className="glass p-3 text-xs font-mono text-white/70 max-h-64 overflow-y-auto overscroll-contain" aria-live="polite">
       <div className="text-[11px] font-sans font-bold text-white/50 mb-1.5">Hand log</div>
       {ids.length ? ids.map((id) => hist[id].map((l, i) => <div key={`${id}-${i}`} className={i === 0 ? 'mt-1.5 text-white/40' : ''}>{l}</div>)) : 'No hands yet.'}
     </aside>
@@ -245,7 +245,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           <TableView code={code} uid={uid} live={live} mySeat={mySeat} tableTheme={tableTheme} deckStyle={deckStyle} fourColour={fourColour} onPickSeat={(s) => { setWantSeat(s); setShowJoin(true) }} />
         </div>
         {(board || logOpen) && (
-          <div className="fixed inset-x-3 top-28 z-30 max-h-[45dvh] overflow-y-auto space-y-3 lg:static lg:inset-auto lg:z-auto lg:w-80 lg:shrink-0 lg:mt-12 lg:max-h-full">
+          <div className="fixed inset-x-3 top-28 z-30 max-h-[45dvh] overflow-y-auto overscroll-contain space-y-3 lg:static lg:inset-auto lg:z-auto lg:w-80 lg:shrink-0 lg:mt-12 lg:max-h-full">
             {board && <Leaderboard pub={pub} uid={uid} isOwner={isOwner} code={code} onClose={() => setBoard(false)} />}
             {logOpen && (
               <HandLog handId={pub.handId} lines={pub.log} />
@@ -308,7 +308,7 @@ function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
         {err && <div className="text-red-300 text-sm">{err}</div>}
         {!data && !err && <div className="text-white/60 text-sm">Loading…</div>}
         {data && (
-          <div className="min-h-0 flex-1 overflow-y-auto space-y-3">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-3">
             <div className="text-xs">
               <div className="flex gap-2 text-[10px] uppercase tracking-wide text-white/40 pb-1">
                 <span className="flex-1">Player</span><span className="w-16 text-right">Chips</span><span className="w-16 text-right">Net</span>{paid && <span className="w-16 text-right">Profit</span>}
@@ -401,7 +401,7 @@ function PastTable({ code, onClose }: { code: string; onClose: () => void }) {
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm grid place-items-center p-4" onClick={onClose}>
-      <div className="glass p-5 w-full max-w-md max-h-[85vh] overflow-y-auto" style={{ background: 'rgba(16,20,32,.96)' }} onClick={(e) => e.stopPropagation()}>{children}</div>
+      <div className="glass p-5 w-full max-w-md max-h-[85vh] overflow-y-auto overscroll-contain" style={{ background: 'rgba(16,20,32,.96)' }} onClick={(e) => e.stopPropagation()}>{children}</div>
     </div>
   )
 }
@@ -439,7 +439,7 @@ function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engi
   const sign = (n: number) => (n > 0 ? '+' : '')
   const tone = (n: number) => (n > 0 ? 'text-emerald-300' : n < 0 ? 'text-rose-300' : 'text-white/60')
   return (
-    <aside className="glass p-4 max-h-[60vh] overflow-y-auto">
+    <aside className="glass p-4 max-h-[60vh] overflow-y-auto overscroll-contain">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-lg font-bold">🏆 Leaderboard</h2>
         <button className="text-white/60 px-1" onClick={onClose} aria-label="Close">✕</button>

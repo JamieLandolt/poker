@@ -419,7 +419,7 @@ function ActionBar({ pub, lg: realLg, myStack, myBet = 0, busy, premove, onAct }
   const potRaise = (f: number) => setClamped(Math.round((pub.currentBet + f * (pub.pot + lg.callAmount)) / bb) * bb)
   // The slider moves in big blinds and snaps to all-in when it gets within one step of the end.
   const onSlide = (v: number) => setAmount(String(lg.maxRaiseTo - v < bb ? lg.maxRaiseTo : v))
-  const btn = 'rounded-xl px-4 py-3 font-bold text-sm sm:text-base transition active:scale-95 disabled:opacity-40'
+  const btn = 'rounded-xl px-4 py-3 font-bold text-sm sm:text-base transition-[scale,opacity,filter] duration-150 ease-out enabled:active:scale-[0.96] disabled:opacity-40'
   const preset = 'rounded-lg bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs font-semibold'
   const slider = Math.min(lg.maxRaiseTo, Math.max(lg.minRaiseTo, isInt ? parsed : lg.minRaiseTo))
   // Queued moves look greyed out; the one you picked lights up.
