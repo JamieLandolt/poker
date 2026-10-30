@@ -209,7 +209,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0">
-      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full mx-auto flex-1 min-h-0 select-none mt-14" style={{ maxWidth: Math.max(h, 320) * 2 }}>
+      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full mx-auto flex-1 min-h-0 select-none mt-14" style={{ maxWidth: Math.max(h, 320) * 1.8 }}>
         <div className="rail" />
         <div className="felt" />
 
