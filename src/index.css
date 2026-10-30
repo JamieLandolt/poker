@@ -29,13 +29,13 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 
 /* ---------- table ---------- */
 .rail {
-  position: absolute; inset: 4% 3%;
+  position: absolute; inset: 1% 3%;
   border-radius: 50%;
   background: var(--rail, linear-gradient(145deg, #2b2f3d, #12141c));
   box-shadow: 0 30px 80px rgba(0,0,0,.65), 0 0 50px var(--rail-glow, transparent), inset 0 2px 0 rgba(255,255,255,.08);
 }
 .felt {
-  position: absolute; inset: 3.2% 2.6%;
+  position: absolute; inset: 0.4% 2.6%;
   border-radius: 50%;
   background: radial-gradient(ellipse at 50% 40%, var(--felt-a), var(--felt-b) 75%);
   box-shadow: inset 0 0 60px rgba(0,0,0,.55), inset 0 0 0 2px rgba(255,255,255,.06);

@@ -108,7 +108,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   // ----- geometry -----
   const small = w < 560
   const cx = w / 2, cy = h / 2
-  const rx = Math.min(w * 0.42, (w - (small ? 96 : 128)) / 2 - 4), ry = h * (small ? 0.36 : 0.34)
+  const rx = Math.min(w * 0.42, (w - (small ? 96 : 128)) / 2 - 4), ry = h * (small ? 0.37 : 0.37)
   // Seats have fixed places around the table, so you sit exactly where you clicked "Sit".
   const pos = (seat: number) => {
     const th = (Math.PI / 180) * (90 + seat * (360 / MAX_SEATS))
@@ -209,7 +209,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0">
-      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full mx-auto flex-1 min-h-0 select-none mt-14" style={{ maxWidth: Math.max(h, 320) * 1.8 }}>
+      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full mx-auto flex-1 min-h-0 select-none mt-14" style={{ maxWidth: Math.max(h, 320) * 1.55 }}>
         <div className="rail" />
         <div className="felt" />
 
@@ -256,7 +256,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           if (!s) {
             if (mySeat >= 0 || readOnly) return null
             return (
-              <button key={i} className="seat glass !w-auto px-3 py-2 text-xs text-white/70 hover:text-white hover:border-white/40" style={{ left: p.x, top: p.y }} onClick={() => onPickSeat(i)}>
+              <button key={i} className="seat glass !w-auto whitespace-nowrap px-3 py-2 text-xs text-white/70 hover:text-white hover:border-white/40" style={{ left: p.x, top: p.y }} onClick={() => onPickSeat(i)}>
                 + Sit
               </button>
             )
