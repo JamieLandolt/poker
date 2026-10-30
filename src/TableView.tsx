@@ -76,6 +76,8 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   }
   // When a betting round closes, the matched chips stay put for a beat, then slide into the pot.
   const [snap, setSnap] = useState(pub)
+  // After an all-in the whole board is dealt at once; the result is held back until the last card has been seen.
+  const [hold, setHold] = useState<{ handId: number; until: number; stacks: Record<number, number>; pot: number } | null>(null)
   const [sweep, setSweep] = useState<{ id: string; items: { seat: number; amount: number; fresh: boolean }[]; checks: number[]; street: string } | null>(null)
   if (snap.handId !== pub.handId || snap.seq !== pub.seq) {
     if (snap.handId === pub.handId && snap.phase === 'betting' && (pub.street !== snap.street || pub.phase !== 'betting')) {
@@ -88,6 +90,13 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
       // Checks from the round that just closed stay visible for a moment too.
       const checks = snap.seats.filter((x) => x && x.inHand && !x.folded && x.bet === 0 && x.lastAction === 'checks').map((x) => x!.seat)
       setSweep({ id: `${pub.handId}-${pub.seq}`, items, checks, street: snap.street })
+      const from = snap.board.length
+      if (pub.phase === 'handOver' && pub.board.length > from) {
+        const last = pub.board.length - 1
+        const grp = (i: number) => (i < 3 ? 0 : i - 2)
+        const delay = (grp(last) - grp(from)) * 900 + (last < 3 ? (last - from) * 160 : 0) + 700
+        setHold({ handId: pub.handId, until: Date.now() + delay + 380 + 1000, stacks: Object.fromEntries(snap.seats.filter(Boolean).map((x) => [x!.seat, x!.stack])), pot: snap.pot })
+      }
     }
     setSnap(pub)
   }
@@ -204,11 +213,12 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
     return { dx: deck.x - bx, dy: deck.y - boardY, rot: -12, delay, flipAt: delay + 380 }
   }
 
+  const holding = !!hold && hold.handId === pub.handId && pub.phase === 'handOver' && now < hold.until
   const refund = pub.result?.refund ?? null
   // What a seat actually won: payouts minus any uncalled-bet refund (that is just their own chips coming back).
   const won = (seat: number) => (pub.result?.payouts[seat] ?? 0) - (refund && refund.seat === seat ? refund.amount : 0)
-  const winners = pub.phase === 'handOver' && pub.result ? new Set(pub.result.pots.flatMap((p) => p.winners).filter((sx) => won(sx) > 0)) : new Set<number>()
-  const myNet = pub.phase === 'handOver' && pub.result && mySeat >= 0 ? Math.max(0, won(mySeat)) : 0
+  const winners = !holding && pub.phase === 'handOver' && pub.result ? new Set(pub.result.pots.flatMap((p) => p.winners).filter((sx) => won(sx) > 0)) : new Set<number>()
+  const myNet = !holding && pub.phase === 'handOver' && pub.result && mySeat >= 0 ? Math.max(0, won(mySeat)) : 0
 
   const seatsView = useMemo(() => pub.seats, [pub.seats])
 
@@ -220,7 +230,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
         {/* centre: pot, deck, board */}
         <div className="absolute" style={{ left: potSpot.x, top: potSpot.y, transform: 'translate(-50%, -50%)' }}>
-          <PotDisplay amount={pub.pot} />
+          <PotDisplay amount={holding ? hold!.pot : pub.pot} />
         </div>
         <div className="absolute" style={{ left: deck.x, top: deck.y, transform: 'translate(-50%, -50%)' }}>
           {[2, 1, 0].map((i) => <div key={i} className="absolute" style={{ left: -boardCw / 2 + i * 1.5, top: -boardCw * 0.7 - i * 1.5 }}><PlayingCard faceUp={false} width={boardCw} /></div>)}
@@ -235,7 +245,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
         </div>
 
         {/* result banner */}
-        {pub.phase === 'handOver' && pub.result && (
+        {!holding && pub.phase === 'handOver' && pub.result && (
           <div className="absolute glass px-3 py-1.5 text-center text-xs" style={{ left: cx, top: potSpot.y - 46, transform: 'translate(-50%, -50%)', maxWidth: '70%' }}>
             {pub.result.pots.map((p, i) => (
               <div key={i}>
@@ -312,7 +322,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                     <span className="truncate max-w-[60px] sm:max-w-[84px]" title={s.name}>{s.name}</span>
                     {s.leaving && <span className="pill">leaving</span>}
                   </div>
-                  <div className="num text-[11px] sm:text-[12px] text-amber-200 font-bold">{s.status === 'busted' ? 'busted' : s.stack.toLocaleString()}</div>
+                  <div className="num text-[11px] sm:text-[12px] text-amber-200 font-bold">{s.status === 'busted' && !holding ? 'busted' : (holding ? hold!.stacks[s.seat] ?? s.stack : s.stack).toLocaleString()}</div>
                   {winners.has(s.seat) && pub.result && (
                     <div className="text-[11px] text-emerald-300 font-bold num">+{won(s.seat).toLocaleString()}</div>
                   )}
@@ -340,8 +350,8 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                 </div>
               ))}
               {winners.has(s.seat) && pub.phase === 'handOver' && (
-                <div className="absolute" style={{ left: p.x + sw * 0.62, top: p.y, transform: 'translate(-50%, -50%)', zIndex: 5 }} key={`win-${pub.handId}-${s.seat}`}>
-                  <Chips amount={won(s.seat)} bigBlind={pub.settings.bigBlind} fly={{ dx: cx - p.x - sw * 0.62, dy: cy - p.y, delay: 200 }} />
+                <div className="absolute" style={{ left: p.x + (p.x < cx - 4 || Math.abs(p.x - cx) <= 4 ? 1 : -1) * (sw * 0.5 + 44), top: p.y, transform: 'translate(-50%, -50%)', zIndex: 5 }} key={`win-${pub.handId}-${s.seat}`}>
+                  <Chips amount={won(s.seat)} bigBlind={pub.settings.bigBlind} fly={{ dx: cx - p.x - (p.x < cx - 4 || Math.abs(p.x - cx) <= 4 ? 1 : -1) * (sw * 0.5 + 44), dy: cy - p.y, delay: 200 }} />
                   <div className="float-win num text-emerald-300 font-extrabold text-lg text-center">+{won(s.seat).toLocaleString()}</div>
                 </div>
               )}
