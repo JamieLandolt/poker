@@ -209,7 +209,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0">
-      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full flex-1 min-h-0 select-none mt-14">
+      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full mx-auto flex-1 min-h-0 select-none mt-14" style={{ maxWidth: Math.max(h, 320) * 2 }}>
         <div className="rail" />
         <div className="felt" />
 
@@ -370,8 +370,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           </div>
         ) : (
           <div className="text-center text-sm text-white/60 pt-4">
-            {myPub ? '' : 'Pick a seat to play.'}
-            {myNet > 0 && <div className="text-emerald-300 font-bold">You won {myNet.toLocaleString()}</div>}
+                        {myNet > 0 && <div className="text-emerald-300 font-bold">You won {myNet.toLocaleString()}</div>}
           </div>
         )}
         {msg && <div className="text-center text-xs text-red-300 mt-1">{msg}</div>}
