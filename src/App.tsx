@@ -200,7 +200,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           {isOwner && <button className={chip} onClick={togglePause}>{pub.paused ? '▶ Resume' : '⏸ Pause'}</button>}
         </span>
         <span className="ml-auto flex items-center gap-1.5 sm:gap-2">
-          <span className="text-white/50 num">{pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
+          <span className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold num whitespace-nowrap">Blinds: {pub.settings.smallBlind}/{pub.settings.bigBlind}</span>
           <button className={chip} onClick={() => setBoard((v) => !v)} aria-label="Leaderboard">🏆<span className="hidden sm:inline"> Leaderboard</span></button>
           <button className={chip} onClick={toggleLog} aria-label="Log">📜<span className="hidden sm:inline"> {logOpen ? 'Hide log' : 'Show log'}</span></button>
           <button className={`${chip} sm:!hidden`} onClick={() => setMenu((v) => !v)} aria-label="Menu">⋯</button>
