@@ -112,13 +112,16 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   // Seats have fixed places around the table, so you sit exactly where you clicked "Sit".
   const pos = (seat: number) => {
     const th = (Math.PI / 180) * (90 + seat * (360 / MAX_SEATS))
-    return { x: cx + rx * Math.cos(th), y: cy + ry * Math.sin(th) }
+    const sn = Math.sin(th)
+    // Pushing the vertical position outwards spreads the side seats apart on a full table.
+    return { x: cx + rx * Math.cos(th), y: cy + ry * Math.sign(sn) * Math.abs(sn) ** 0.75 }
   }
   const deck = { x: cx - (small ? 0.2 : 0.2) * w, y: cy - 0.02 * h }
-  const cw = small ? 26 : 40
+  const crowd = pub.seats.filter(Boolean).length >= 7
+  const cw = small ? (crowd ? 22 : 26) : (crowd ? 32 : 40)
   const heroCw = small ? 40 : 56
   const boardCw = small ? 32 : 52
-  const sw = small ? 80 : 128
+  const sw = small ? (crowd ? 70 : 80) : (crowd ? 112 : 128)
 
   // ----- dealing order -----
   const inHand = pub.seats.filter((s): s is PublicSeat => !!s && s.inHand)
@@ -267,7 +270,8 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           const showCards = s.inHand && (!(pub.phase === 'handOver' && s.folded) || !!s.cards)
           const cardW = isMe ? heroCw : cw
           // Bottom-half seats have their cards between the plate and the table centre; keep the bet clear of them.
-          const betSpot = { x: p.x + (cx - p.x) * 0.5, y: p.y + (cy - p.y) * 0.5 - (p.y > cy ? cardW * 1.5 : 0) }
+          const betFrac = crowd ? 0.34 : 0.5
+          const betSpot = { x: p.x + (cx - p.x) * betFrac, y: p.y + (cy - p.y) * betFrac - (p.y > cy ? cardW * 1.5 : 0) }
           const fly = (c: number) => {
             if (!animating || dealIdx < 0) return null
             const delay = (c * nDeal + dealIdx) * DEAL_STEP
@@ -282,7 +286,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
             <div key={i}>
               <div className={cls} style={{ left: p.x, top: p.y, ['--sw' as string]: `${sw}px`, ['--dur' as string]: `${dur}s`, ['--delay' as string]: `-${Math.max(0, dur * 1000 - remaining) / 1000}s` }}>
                 {showCards && (
-                  <div className="flex justify-center gap-1 mb-1.5" style={{ marginTop: -cardW * 0.6, marginBottom: 30, position: 'relative', zIndex: 3 }}>
+                  <div className="flex justify-center gap-1" style={isMe ? { marginTop: -cardW * 0.6, marginBottom: 36, position: 'relative', zIndex: 3 } : { marginBottom: -cardW * 0.2, position: 'relative', zIndex: 1 }}>
                     {[0, 1].map((c) => {
                       const card = face(c)
                       const up = !!card
@@ -308,6 +312,9 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                   {winners.has(s.seat) && pub.result && (
                     <div className="text-[11px] text-emerald-300 font-bold num">+{won(s.seat).toLocaleString()}</div>
                   )}
+                  {s.bet === 0 && pub.phase === 'betting' && s.lastAction === 'checks' && (
+                    <div className={`absolute pointer-events-none ${small ? 'inset-x-0 -bottom-3 flex justify-center' : `top-1/2 -translate-y-1/2 ${p.x < cx - 4 ? 'right-full pr-1.5' : 'left-full pl-1.5'}`}`} style={{ zIndex: 4 }} key={`chk-${pub.handId}-${pub.street}`}><span className="check-pill">CHECK</span></div>
+                  )}
                   <div className="absolute -top-2 -right-2 flex flex-col gap-0.5">
                     {s.status === 'sitOut' && <span className="badge b-afk">AFK</span>}
                     {pub.button === s.seat && pub.phase !== 'waiting' && <span className="badge b-d" title="Dealer">D</span>}
@@ -328,11 +335,6 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                   </div>
                 </div>
               ))}
-              {s.bet === 0 && pub.phase === 'betting' && s.lastAction === 'checks' && (
-                <div className="absolute" style={{ left: betSpot.x, top: betSpot.y, transform: 'translate(-50%, -50%)' }} key={`chk-${pub.handId}-${pub.street}-${s.seat}`}>
-                  <span className="check-pill">CHECK</span>
-                </div>
-              )}
               {winners.has(s.seat) && pub.phase === 'handOver' && (
                 <div className="absolute" style={{ left: p.x, top: p.y - 10, transform: 'translate(-50%, -50%)', zIndex: 5 }} key={`win-${pub.handId}-${s.seat}`}>
                   <Chips amount={won(s.seat)} bigBlind={pub.settings.bigBlind} fly={{ dx: cx - p.x, dy: cy - p.y, delay: 200 }} />
