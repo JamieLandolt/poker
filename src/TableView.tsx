@@ -268,7 +268,9 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           const dealIdx = order.indexOf(s.seat)
           const face = (c: number): Card | null => (isMe ? holeOk?.[c] ?? null : s.cards?.[c] ?? null)
           const showCards = s.inHand && (!(pub.phase === 'handOver' && s.folded) || !!s.cards)
-          const cardW = isMe ? heroCw : cw
+          // Cards shown at the end of a hand are lifted clear of the avatar and drawn larger so the suit is readable.
+          const revealed = !isMe && !!s.cards
+          const cardW = isMe ? heroCw : revealed ? Math.round(cw * 1.3) : cw
           // Bottom-half seats have their cards between the plate and the table centre; keep the bet clear of them.
           const betFrac = crowd ? 0.34 : 0.5
           const betSpot = { x: p.x + (cx - p.x) * betFrac, y: p.y + (cy - p.y) * betFrac - (p.y > cy ? cardW * 1.5 : 0) }
@@ -286,7 +288,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
             <div key={i}>
               <div className={cls} style={{ left: p.x, top: p.y, ['--sw' as string]: `${sw}px`, ['--dur' as string]: `${dur}s`, ['--delay' as string]: `-${Math.max(0, dur * 1000 - remaining) / 1000}s` }}>
                 {showCards && (
-                  <div className="flex justify-center gap-1" style={isMe ? { marginTop: -cardW * 0.6, marginBottom: 36, position: 'relative', zIndex: 3 } : { marginBottom: -cardW * 0.2, position: 'relative', zIndex: 1 }}>
+                  <div className="flex justify-center gap-1" style={isMe ? { marginTop: -cardW * 0.6, marginBottom: 36, position: 'relative', zIndex: 3 } : revealed ? { marginBottom: 22, position: 'relative', zIndex: 3 } : { marginBottom: -cardW * 0.2, position: 'relative', zIndex: 1 }}>
                     {[0, 1].map((c) => {
                       const card = face(c)
                       const up = !!card
@@ -336,8 +338,8 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                 </div>
               ))}
               {winners.has(s.seat) && pub.phase === 'handOver' && (
-                <div className="absolute" style={{ left: p.x, top: p.y - 10, transform: 'translate(-50%, -50%)', zIndex: 5 }} key={`win-${pub.handId}-${s.seat}`}>
-                  <Chips amount={won(s.seat)} bigBlind={pub.settings.bigBlind} fly={{ dx: cx - p.x, dy: cy - p.y, delay: 200 }} />
+                <div className="absolute" style={{ left: p.x + sw * 0.62, top: p.y, transform: 'translate(-50%, -50%)', zIndex: 5 }} key={`win-${pub.handId}-${s.seat}`}>
+                  <Chips amount={won(s.seat)} bigBlind={pub.settings.bigBlind} fly={{ dx: cx - p.x - sw * 0.62, dy: cy - p.y, delay: 200 }} />
                   <div className="float-win num text-emerald-300 font-extrabold text-lg text-center">+{won(s.seat).toLocaleString()}</div>
                 </div>
               )}
