@@ -7,8 +7,17 @@ export const MAX_SEATS = 9
 export const GRACE_MS = 1000
 export const AWAY_SIT_OUT_MS = 45_000
 export const AWAY_LEAVE_MS = 120_000
-export const NEXT_HAND_MS = 6000
-export const NEXT_HAND_FOLD_MS = 3500
+/** Time the result stays on screen before the next hand is dealt. */
+export const NEXT_HAND_MS = 8000
+export const NEXT_HAND_FOLD_MS = 8000
+
+/** Extra time for the client to deal out the rest of the board (all-in runout) and show the river before the result appears. */
+function runoutMs(from: number, to: number): number {
+  if (to <= from) return 0
+  const grp = (i: number) => (i < 3 ? 0 : i - 2)
+  const last = to - 1
+  return (grp(last) - grp(from)) * 900 + (last < 3 ? (last - from) * 160 : 0) + 700 + 380 + 1000
+}
 /** An AFK player is removed (and cashed out) after this long. */
 export const AFK_KICK_MS = 30 * 60_000
 export const BUSTED_MAX_MS = 5 * 60_000
@@ -370,18 +379,19 @@ export function act(t: Table, uid: string, a: { handId: number; seq: number; kin
   if (t.phase !== 'betting' || !t.hand) return false
   const hi = handIdx(t, uid)
   if (hi < 0) fail('You are not in this hand')
+  const boardBefore = t.hand.board.length
   const next = applyAction(t.hand, { ...a, seat: hi })
   if (next === t.hand) return false // stale or illegal: ignored
   t.hand = next
   t.handTouched = true
   const s = t.seats[seatOf(t, uid)]
   if (s) { s.timeouts = 0; s.lastSeen = now }
-  afterHandChange(t, now, true)
+  afterHandChange(t, now, true, boardBefore)
   return true
 }
 
 /** Sync seats from the hand, detect the end of the hand, re-arm the turn clock. */
-function afterHandChange(t: Table, now: number, rearm = false) {
+function afterHandChange(t: Table, now: number, rearm = false, boardBefore = -1) {
   const h = t.hand!
   for (const l of h.log.slice(t.ledgerHandLen)) note(t, l)
   t.ledgerHandLen = h.log.length
@@ -390,7 +400,7 @@ function afterHandChange(t: Table, now: number, rearm = false) {
     const si = seatOf(t, p.uid)
     if (si >= 0) t.seats[si]!.stack = p.stack
   }
-  if (h.phase === 'handOver' && t.phase !== 'handOver') onHandOver(t, now)
+  if (h.phase === 'handOver' && t.phase !== 'handOver') onHandOver(t, now, boardBefore >= 0 ? runoutMs(boardBefore, h.board.length) : 0)
   else if (h.phase === 'betting') {
     const actor = h.toAct >= 0 ? h.players[h.toAct].uid : null
     // A new clock starts after someone acts or when a different player becomes the actor;
@@ -403,11 +413,11 @@ function afterHandChange(t: Table, now: number, rearm = false) {
   touch(t)
 }
 
-function onHandOver(t: Table, now: number) {
+function onHandOver(t: Table, now: number, extraMs = 0) {
   const h = t.hand!
   t.phase = 'handOver'
   t.deadline = null
-  t.nextHandAt = now + (h.result?.showdown ? NEXT_HAND_MS : NEXT_HAND_FOLD_MS)
+  t.nextHandAt = now + (h.result?.showdown ? NEXT_HAND_MS : NEXT_HAND_FOLD_MS) + extraMs
   for (const p of h.players) {
     const won = h.result?.payouts[p.id] ?? 0
     const rec = t.records[p.uid]
