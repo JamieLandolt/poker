@@ -76,7 +76,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   }
   // When a betting round closes, the matched chips stay put for a beat, then slide into the pot.
   const [snap, setSnap] = useState(pub)
-  const [sweep, setSweep] = useState<{ id: string; items: { seat: number; amount: number; fresh: boolean }[] } | null>(null)
+  const [sweep, setSweep] = useState<{ id: string; items: { seat: number; amount: number; fresh: boolean }[]; checks: number[]; street: string } | null>(null)
   if (snap.handId !== pub.handId || snap.seq !== pub.seq) {
     if (snap.handId === pub.handId && snap.phase === 'betting' && (pub.street !== snap.street || pub.phase !== 'betting')) {
       const items = snap.seats.flatMap((x) => {
@@ -85,7 +85,9 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
         const amount = foldedNow || x.allIn ? x.bet : Math.max(x.bet, snap.currentBet)
         return amount > 0 ? [{ seat: x.seat, amount, fresh: x.bet < amount }] : []
       })
-      setSweep({ id: `${pub.handId}-${pub.seq}`, items })
+      // Checks from the round that just closed stay visible for a moment too.
+      const checks = snap.seats.filter((x) => x && x.inHand && !x.folded && x.bet === 0 && x.lastAction === 'checks').map((x) => x!.seat)
+      setSweep({ id: `${pub.handId}-${pub.seq}`, items, checks, street: snap.street })
     }
     setSnap(pub)
   }
@@ -314,8 +316,8 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                   {winners.has(s.seat) && pub.result && (
                     <div className="text-[11px] text-emerald-300 font-bold num">+{won(s.seat).toLocaleString()}</div>
                   )}
-                  {s.bet === 0 && pub.phase === 'betting' && s.lastAction === 'checks' && (
-                    <div className={`absolute pointer-events-none ${small ? 'inset-x-0 -bottom-3 flex justify-center' : `top-1/2 -translate-y-1/2 ${p.x < cx - 4 ? 'right-full pr-1.5' : 'left-full pl-1.5'}`}`} style={{ zIndex: 4 }} key={`chk-${pub.handId}-${pub.street}`}><span className="check-pill">CHECK</span></div>
+                  {((s.bet === 0 && pub.phase === 'betting' && s.lastAction === 'checks') || (sweep?.checks.includes(s.seat) ?? false)) && (
+                    <div className={`absolute pointer-events-none ${small ? 'inset-x-0 -bottom-3 flex justify-center' : `top-1/2 -translate-y-1/2 ${p.x < cx - 4 ? 'right-full pr-1.5' : 'left-full pl-1.5'}`}`} style={{ zIndex: 4 }} key={`chk-${pub.handId}-${sweep?.street ?? pub.street}`}><span className="check-pill">CHECK</span></div>
                   )}
                   <div className="absolute -top-2 -right-2 flex flex-col gap-0.5">
                     {s.status === 'sitOut' && <span className="badge b-afk">AFK</span>}
