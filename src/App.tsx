@@ -141,8 +141,8 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const [copied, setCopied] = useState(false)
   const [menu, setMenu] = useState(false)
   const [codeCopied, setCodeCopied] = useState(false)
-  const [tableTheme, setTableTheme] = useState(() => { const v = lsGet(THEME_KEY); return TABLE_THEMES.some((t) => t[0] === v) ? (v as string) : 'classic' })
-  const [deckStyle, setDeckStyle] = useState(() => { const v = lsGet(DECK_KEY); return DECKS.some((d) => d[0] === v) ? (v as string) : 'indigo' })
+  const [tableTheme, setTableTheme] = useState(() => { const v = lsGet(THEME_KEY); return TABLE_THEMES.some((t) => t[0] === v) ? (v as string) : 'neon' })
+  const [deckStyle, setDeckStyle] = useState(() => { const v = lsGet(DECK_KEY); return DECKS.some((d) => d[0] === v) ? (v as string) : 'gold' })
   const [fourColour, setFourColour] = useState(() => lsGet(FACES_KEY) === '1')
   const [themes, setThemes] = useState(false)
 
@@ -380,7 +380,7 @@ function PastTable({ code, onClose }: { code: string; onClose: () => void }) {
           {final && !final.pub && <div className="text-white/60 text-sm">No final screen was saved for this table.</div>}
           {final?.pub && (
             <TableView code={code} uid="" live={{ status: 'ready', pub: final.pub, hole: null, offset: 0, fromCache: false }} mySeat={-1} readOnly
-              tableTheme={lsGet(THEME_KEY) ?? 'classic'} deckStyle={lsGet(DECK_KEY) ?? 'indigo'} fourColour={lsGet(FACES_KEY) === '1'} onPickSeat={() => {}} />
+              tableTheme={lsGet(THEME_KEY) ?? 'neon'} deckStyle={lsGet(DECK_KEY) ?? 'gold'} fourColour={lsGet(FACES_KEY) === '1'} onPickSeat={() => {}} />
           )}
         </div>
       </div>
