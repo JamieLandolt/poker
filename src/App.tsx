@@ -525,6 +525,7 @@ function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engi
 }
 
 function SettingsCard({ code, pub, onClose }: { code: string; pub: import('./engine/table.ts').PublicTable; onClose: () => void }) {
+  const locked = pub.leaderboard.length > 0
   const [bb, setBb] = useState(pub.pendingSettings?.bigBlind ?? pub.settings.bigBlind)
   const [stack, setStack] = useState(pub.pendingSettings?.startStack ?? pub.settings.startStack)
   const [price, setPrice] = useState(String((pub.pendingSettings?.buyInCents ?? pub.settings.buyInCents ?? 0) / 100))
@@ -539,10 +540,9 @@ function SettingsCard({ code, pub, onClose }: { code: string; pub: import('./eng
   return (
     <Modal onClose={onClose}>
       <h2 className="text-lg font-bold mb-2">Table settings</h2>
-      <p className="text-xs text-white/50 mb-3">Changes apply from the next hand. New buy-ins use the new stack size.</p>
       <label className="block text-sm mb-2">Big blind<input className={f} type="number" min={2} step={2} value={bb} onChange={(e) => setBb(Math.floor(Number(e.target.value)))} /></label>
-      <label className="block text-sm mb-2">Buy-in price ($, 0 = don't track money)<input className={f} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
-      <label className="block text-sm mb-2">Chips per buy-in (at least 20 big blinds)<input className={f} type="number" min={bb * 20} step={100} value={stack} onChange={(e) => setStack(Math.floor(Number(e.target.value)))} /></label>
+      <label className="block text-sm mb-2">Buy-in price ($)<input className={`${f} disabled:opacity-50`} disabled={locked} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
+      <label className="block text-sm mb-2">Chips per buy-in<input className={`${f} disabled:opacity-50`} disabled={locked} type="number" min={bb * 20} step={100} value={stack} onChange={(e) => setStack(Math.floor(Number(e.target.value)))} /></label>
       {err && <div className="text-red-300 text-sm">{err}</div>}
       <div className="flex gap-2 justify-end mt-3"><button className="rounded-xl px-4 py-2 bg-white/10" onClick={onClose}>Cancel</button><button className="rounded-xl px-5 py-2 font-bold bg-gradient-to-r from-emerald-400 to-yellow-300 text-black" onClick={save}>Save</button></div>
     </Modal>

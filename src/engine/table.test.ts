@@ -558,3 +558,14 @@ describe('review fixes', () => {
     expect(rows.reduce((x, r) => x + r.net, 0)).toBe(0)
   })
 })
+
+describe('locked buy-in', () => {
+  it('blinds can change after buy-ins, the price and chips per buy-in cannot', () => {
+    const t = createTable('ABCDE', 'u0', S, 0)
+    sit(t, 'u0', 'A', undefined, 0)
+    expect(() => setSettings(t, 'u0', { ...S, buyInCents: 500 })).toThrow(TableError)
+    expect(() => setSettings(t, 'u0', { ...S, startStack: 5000 })).toThrow(TableError)
+    setSettings(t, 'u0', { ...S, smallBlind: 20, bigBlind: 40 })
+    expect(t.settings.bigBlind).toBe(40)
+  })
+})

@@ -354,6 +354,9 @@ export function setPaused(t: Table, uid: string, on: boolean, now: number): void
 export function setSettings(t: Table, uid: string, s: TableSettings): void {
   if (uid !== t.ownerUid) fail('Only the table owner can change settings')
   validateSettings(s)
+  // Once anyone has bought in, the buy-in price and chips per buy-in are fixed so the money stays fair.
+  const cur = t.pendingSettings ?? t.settings
+  if (Object.keys(t.records).length > 0 && (s.buyInCents !== cur.buyInCents || s.startStack !== cur.startStack)) fail('The buy-in is locked once someone has bought in')
   // Nothing is being dealt: apply now, so new buy-ins use the new price straight away.
   if (t.phase !== 'betting') { t.settings = s; t.pendingSettings = null } else t.pendingSettings = s
   note(t, `Host sets blinds ${n(s.smallBlind)}/${n(s.bigBlind)}, ${n(s.startStack)} chips per buy-in${s.buyInCents ? ` at $${(s.buyInCents / 100).toFixed(2)}` : ''} (from next hand)`)

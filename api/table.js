@@ -194546,6 +194546,8 @@ function setPaused(t2, uid, on, now) {
 function setSettings(t2, uid, s2) {
   if (uid !== t2.ownerUid) fail("Only the table owner can change settings");
   validateSettings(s2);
+  const cur = t2.pendingSettings ?? t2.settings;
+  if (Object.keys(t2.records).length > 0 && (s2.buyInCents !== cur.buyInCents || s2.startStack !== cur.startStack)) fail("The buy-in is locked once someone has bought in");
   if (t2.phase !== "betting") {
     t2.settings = s2;
     t2.pendingSettings = null;
