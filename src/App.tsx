@@ -153,10 +153,11 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const isOwner = pub?.ownerUid === uid
   // Once you were seated and no longer are (left, removed, seat freed), go back to the lobby.
   const wasSeated = useRef(false)
+  const watching = useRef(false)
   useEffect(() => {
     if (!pub) return
-    if (mySeat >= 0) wasSeated.current = true
-    else if (wasSeated.current) location.hash = ''
+    if (mySeat >= 0) { wasSeated.current = true; watching.current = false }
+    else if (wasSeated.current && !watching.current) location.hash = ''
   }, [pub, mySeat])
   const toggleLog = () => setLogOpen((v) => { lsSet(LOG_KEY, v ? '0' : '1'); return !v })
   const link = `${location.origin}/#${code}`
@@ -167,6 +168,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const afk = mySeat >= 0 && pub?.seats[mySeat]?.status === 'sitOut'
   const toggleAfk = () => void api('sitOut', { code, out: !afk }).then((r) => { if (!r.ok) alert(r.error) })
   const togglePause = () => void api('pause', { code, on: !pub?.paused })
+  const doWatch = () => { if (confirm('Cash out and keep watching?')) { watching.current = true; void api('leave', { code }) } }
   const doLeave = () => { if (confirm('Leave the table? Your chips are cashed out.')) void api('leave', { code }).then(() => { location.hash = '' }) }
   const copyCode = async () => {
     try { await navigator.clipboard.writeText(code); setCodeCopied(true); setTimeout(() => setCodeCopied(false), 1500) } catch { /* ignore */ }
@@ -194,6 +196,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
         <span className="hidden sm:contents">
           <button className={chip} onClick={copy}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
           {joined && <button className={chip} onClick={toggleAfk}>{afk ? "I'm back" : 'Go AFK'}</button>}
+          {joined && <button className={chip} onClick={doWatch}>Cash out and watch</button>}
           {joined && <button className={`${chip} !text-red-300`} onClick={doLeave}>Leave</button>}
           {isHost && <button className={chip} onClick={() => setShowHistory(true)}>History</button>}
           {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
@@ -213,6 +216,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           {isHost && <button className={chip} onClick={() => { setShowHistory(true); setMenu(false) }}>History</button>}
           {isOwner && <button className={chip} onClick={() => { setSettings(true); setMenu(false) }}>⚙ Settings</button>}
           {isOwner && <button className={chip} onClick={() => { togglePause(); setMenu(false) }}>{pub.paused ? '▶ Resume timers' : '⏸ Pause timers'}</button>}
+          {joined && <button className={chip} onClick={() => { setMenu(false); doWatch() }}>Cash out and watch</button>}
           {joined && <button className={`${chip} !text-red-300`} onClick={() => { setMenu(false); doLeave() }}>Leave table</button>}
         </div>
       )}
