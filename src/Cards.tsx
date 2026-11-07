@@ -49,7 +49,7 @@ export function Slot({ width }: { width: number }) {
 const TIERS: [number, string][] = [[50, '#26262e'], [20, '#7c3aed'], [5, '#16a34a'], [2, '#2563eb'], [1, '#dc2626']]
 function chipColor(amount: number, bigBlind: number): string {
   const bbs = amount / Math.max(1, bigBlind)
-  return (TIERS.find(([v]) => bbs >= v) ?? [0, '#e5e7eb'])[1]
+  return (TIERS.find(([v]) => bbs >= v) ?? [0, '#7d8594'])[1]
 }
 
 export function Chips({ amount, bigBlind, fly }: { amount: number; bigBlind: number; fly?: { dx: number; dy: number; delay: number } }) {
