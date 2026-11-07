@@ -580,6 +580,8 @@ export interface PublicTable {
   code: string
   ownerUid: string
   creatorUid: string
+  /** Everyone who has ever sat at this table; lets them find it again for the settlement. */
+  playerUids: string[]
   settings: TableSettings
   pendingSettings: TableSettings | null
   phase: Table['phase']
@@ -648,7 +650,7 @@ export function publicView(t: Table, now: number): PublicTable {
     return { uid: r.uid, name: r.name, buyIns: r.buyIns, invested: r.invested, cashedOut: r.cashedOut, cashedOutCents: Math.round(r.cashedOut * perChip), stack, net: stack + r.cashedOut - r.invested, paidCents: paid, netCents: Math.round((stack + r.cashedOut) * perChip) - paid, handsWon: r.handsWon, biggestPot: r.biggestPot, seated: !!s }
   }).sort((a, b) => b.net - a.net)
   return {
-    code: t.code, ownerUid: t.ownerUid, creatorUid: t.creatorUid, settings: t.settings, pendingSettings: t.pendingSettings,
+    code: t.code, ownerUid: t.ownerUid, creatorUid: t.creatorUid, playerUids: Object.keys(t.records), settings: t.settings, pendingSettings: t.pendingSettings,
     phase: t.phase, handId: h?.handId ?? 0, seq: h?.seq ?? 0, street: h?.street ?? 'preflop', board,
     pot: h && t.phase === 'betting' ? h.players.reduce((a, p) => a + p.total, 0) : 0,
     currentBet: h?.currentBet ?? 0, minRaise: h?.minRaise ?? 0,

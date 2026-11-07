@@ -194787,6 +194787,7 @@ function publicView(t2, now) {
     code: t2.code,
     ownerUid: t2.ownerUid,
     creatorUid: t2.creatorUid,
+    playerUids: Object.keys(t2.records),
     settings: t2.settings,
     pendingSettings: t2.pendingSettings,
     phase: t2.phase,
@@ -194900,11 +194901,20 @@ var firestoreStore = {
   },
   async hostTables(uid, since) {
     const db = getFirestore(app());
-    const [idx, owned] = await Promise.all([db.collection(`hosts/${uid}/tables`).get(), db.collection("tables").where("ownerUid", "==", uid).get()]);
+    const [idx, owned, played] = await Promise.all([
+      db.collection(`hosts/${uid}/tables`).get(),
+      db.collection("tables").where("ownerUid", "==", uid).get(),
+      db.collection("tables").where("playerUids", "array-contains", uid).get()
+    ]);
     const byCode = /* @__PURE__ */ new Map();
-    idx.forEach((d) => byCode.set(d.id, Number(d.data().at)));
-    owned.forEach((d) => byCode.set(d.id, Math.max(byCode.get(d.id) ?? 0, d.data().updatedAt?.toMillis?.() ?? 0)));
-    return [...byCode].map(([code, at]) => ({ code, at })).filter((x2) => x2.at >= since).sort((a, b) => b.at - a.at);
+    const put2 = (code, at, host) => {
+      const prev = byCode.get(code);
+      byCode.set(code, { at: Math.max(prev?.at ?? 0, at), host: host || !!prev?.host });
+    };
+    idx.forEach((d) => put2(d.id, Number(d.data().at), true));
+    owned.forEach((d) => put2(d.id, d.data().updatedAt?.toMillis?.() ?? 0, true));
+    played.forEach((d) => put2(d.id, d.data().updatedAt?.toMillis?.() ?? 0, false));
+    return [...byCode].map(([code, v]) => ({ code, ...v })).filter((x2) => x2.at >= since).sort((a, b) => b.at - a.at);
   },
   async ping(code, uid, now) {
     const db = getFirestore(app());
@@ -194976,6 +194986,13 @@ async function handle(uid, req, deps) {
     if (req.type === "myTables") return { ok: true, tables: await deps.store.hostTables(uid, now - HISTORY_MS) };
     const code = String(req.code ?? "").toUpperCase();
     if (!CODE_RE.test(code)) return { ok: false, error: "Bad table code" };
+    if (req.type === "summary") {
+      const t2 = await deps.store.loadTable(code);
+      if (!t2) return { ok: false, error: "Table not found" };
+      if (uid !== t2.creatorUid && uid !== t2.ownerUid && !t2.records[uid]) return { ok: false, error: "You were not at this table" };
+      const pv = publicView(migrate(t2), now);
+      return { ok: true, history: { entries: [], leaderboard: pv.leaderboard, settings: pv.settings, final: t2.finalSnap ?? null } };
+    }
     if (req.type === "history") {
       const t2 = await deps.store.loadTable(code);
       if (!t2) return { ok: false, error: "Table not found" };

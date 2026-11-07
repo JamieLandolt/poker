@@ -17,7 +17,7 @@ export interface Store {
   loadTable(code: string): Promise<Table | null>
   /** Ledger entries newer than `since`; older ones are dropped. */
   ledger(code: string, since: number): Promise<{ at: number; lines: string[] }[]>
-  hostTables(uid: string, since: number): Promise<{ code: string; at: number }[]>
+  hostTables(uid: string, since: number): Promise<{ code: string; at: number; host: boolean }[]>
 }
 
 export interface Request {
@@ -86,6 +86,15 @@ export async function handle(uid: string, req: Request, deps: HandlerDeps): Prom
 
     const code = String(req.code ?? '').toUpperCase()
     if (!CODE_RE.test(code)) return { ok: false, error: 'Bad table code' }
+
+    if (req.type === 'summary') {
+      // Everyone who played gets the standings and settlement; only the host gets the full log.
+      const t = await deps.store.loadTable(code)
+      if (!t) return { ok: false, error: 'Table not found' }
+      if (uid !== t.creatorUid && uid !== t.ownerUid && !t.records[uid]) return { ok: false, error: 'You were not at this table' }
+      const pv = publicView(migrate(t), now)
+      return { ok: true, history: { entries: [], leaderboard: pv.leaderboard, settings: pv.settings, final: t.finalSnap ?? null } }
+    }
 
     if (req.type === 'history') {
       const t = await deps.store.loadTable(code)

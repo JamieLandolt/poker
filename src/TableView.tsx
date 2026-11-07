@@ -218,6 +218,18 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   // What a seat actually won: payouts minus any uncalled-bet refund (that is just their own chips coming back).
   const won = (seat: number) => (pub.result?.payouts[seat] ?? 0) - (refund && refund.seat === seat ? refund.amount : 0)
   const winners = !holding && pub.phase === 'handOver' && pub.result ? new Set(pub.result.pots.flatMap((p) => p.winners).filter((sx) => won(sx) > 0)) : new Set<number>()
+  // One line per set of winners: side pots won by the same player are added together.
+  const resultLines = (() => {
+    if (!pub.result) return []
+    const by = new Map<string, { winners: number[]; amount: number }>()
+    for (const p of pub.result.pots) {
+      const key = [...p.winners].sort((a, b) => a - b).join(',')
+      const cur = by.get(key)
+      if (cur) cur.amount += p.amount
+      else by.set(key, { winners: p.winners, amount: p.amount })
+    }
+    return [...by.values()]
+  })()
   const myNet = !holding && pub.phase === 'handOver' && pub.result && mySeat >= 0 ? Math.max(0, won(mySeat)) : 0
 
   const seatsView = useMemo(() => pub.seats, [pub.seats])
@@ -247,13 +259,13 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
         {/* result banner */}
         {!holding && pub.phase === 'handOver' && pub.result && (
           <div className="absolute glass px-3 py-1.5 text-center text-xs" style={{ left: cx, top: boardY + boardCw * 0.7 + 12, transform: 'translate(-50%, 0)', maxWidth: '70%', zIndex: 6 }}>
-            {pub.result.pots.slice(0, 3).map((p, i) => (
+            {resultLines.slice(0, 3).map((p, i) => (
               <div key={i}>
                 <b className="text-amber-200">{p.winners.map((s) => pub.seats[s]?.name ?? 'Player').join(' & ')}</b> won {p.amount.toLocaleString()}
                 {pub.result!.showdown && p.winners[0] !== undefined && pub.result!.hands[p.winners[0]] ? ` · ${pub.result!.hands[p.winners[0]]}` : ''}
               </div>
             ))}
-            {pub.result.pots.length > 3 && <div className="text-white/60">+{pub.result.pots.length - 3} more</div>}
+            {resultLines.length > 3 && <div className="text-white/60">+{resultLines.length - 3} more</div>}
           </div>
         )}
         {pub.paused && (

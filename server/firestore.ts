@@ -76,12 +76,21 @@ export const firestoreStore: Store = {
   },
   async hostTables(uid, since) {
     const db = getFirestore(app())
-    const [idx, owned] = await Promise.all([db.collection(`hosts/${uid}/tables`).get(), db.collection('tables').where('ownerUid', '==', uid).get()])
-    const byCode = new Map<string, number>()
-    idx.forEach((d) => byCode.set(d.id, Number(d.data().at)))
+    const [idx, owned, played] = await Promise.all([
+      db.collection(`hosts/${uid}/tables`).get(),
+      db.collection('tables').where('ownerUid', '==', uid).get(),
+      db.collection('tables').where('playerUids', 'array-contains', uid).get(),
+    ])
+    const byCode = new Map<string, { at: number; host: boolean }>()
+    const put = (code: string, at: number, host: boolean) => {
+      const prev = byCode.get(code)
+      byCode.set(code, { at: Math.max(prev?.at ?? 0, at), host: host || !!prev?.host })
+    }
+    idx.forEach((d) => put(d.id, Number(d.data().at), true))
     // Tables from before the index existed are found through their current owner.
-    owned.forEach((d) => byCode.set(d.id, Math.max(byCode.get(d.id) ?? 0, d.data().updatedAt?.toMillis?.() ?? 0)))
-    return [...byCode].map(([code, at]) => ({ code, at })).filter((x) => x.at >= since).sort((a, b) => b.at - a.at)
+    owned.forEach((d) => put(d.id, d.data().updatedAt?.toMillis?.() ?? 0, true))
+    played.forEach((d) => put(d.id, d.data().updatedAt?.toMillis?.() ?? 0, false))
+    return [...byCode].map(([code, v]) => ({ code, ...v })).filter((x) => x.at >= since).sort((a, b) => b.at - a.at)
   },
   async ping(code, uid, now) {
     const db = getFirestore(app())

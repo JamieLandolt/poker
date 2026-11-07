@@ -186,6 +186,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
 
   const joined = mySeat >= 0
   const isHost = pub.ownerUid === uid || pub.creatorUid === uid
+  const isPlayer = isHost || pub.leaderboard.some((r) => r.uid === uid)
     const chip = 'rounded-lg bg-white/10 hover:bg-white/15 px-3 py-1.5 text-xs font-semibold'
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -199,7 +200,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           {joined && <button className={chip} onClick={doWatch}>Cash out and watch</button>}
           {joined && <button className={`${chip} !text-red-300`} onClick={doLeave}>Leave</button>}
           {isHost && <button className={chip} onClick={() => setShowHistory('log')}>History</button>}
-          {isHost && <button className={chip} onClick={() => setShowHistory('settle')}>Settlement</button>}
+          {isPlayer && <button className={chip} onClick={() => setShowHistory('settle')}>Settlement</button>}
           {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
           {isOwner && <button className={chip} onClick={togglePause}>{pub.paused ? '▶ Resume' : '⏸ Pause'}</button>}
         </span>
@@ -215,7 +216,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           <button className={chip} onClick={() => { void copy(); setMenu(false) }}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
           {joined && <button className={chip} onClick={() => { toggleAfk(); setMenu(false) }}>{afk ? "I'm back" : 'Go AFK'}</button>}
           {isHost && <button className={chip} onClick={() => { setShowHistory('log'); setMenu(false) }}>History</button>}
-          {isHost && <button className={chip} onClick={() => { setShowHistory('settle'); setMenu(false) }}>Settlement</button>}
+          {isPlayer && <button className={chip} onClick={() => { setShowHistory('settle'); setMenu(false) }}>Settlement</button>}
           {isOwner && <button className={chip} onClick={() => { setSettings(true); setMenu(false) }}>⚙ Settings</button>}
           {isOwner && <button className={chip} onClick={() => { togglePause(); setMenu(false) }}>{pub.paused ? '▶ Resume timers' : '⏸ Pause timers'}</button>}
           {joined && <button className={chip} onClick={() => { setMenu(false); doWatch() }}>Cash out and watch</button>}
@@ -264,7 +265,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
         <div className="flex flex-wrap justify-center gap-2 py-2 flex-none">
           <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
           {isHost && <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setShowHistory('log')}>History</button>}
-          {isHost && <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setShowHistory('settle')}>Settlement</button>}
+          {isPlayer && <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setShowHistory('settle')}>Settlement</button>}
           <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => { location.hash = '' }}>Back to lobby</button>
         </div>
       )}
@@ -308,13 +309,13 @@ function HistoryCard({ code, onClose, startOn = 'log' }: { code: string; onClose
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     let live = true
-    void api('history', { code }).then((r) => {
+    void api(startOn === 'settle' ? 'summary' : 'history', { code }).then((r) => {
       if (!live) return
       if (r.ok) setData((r as unknown as { history: HistoryData }).history)
       else setErr(r.error ?? 'Could not load the history')
     })
     return () => { live = false }
-  }, [code])
+  }, [code, startOn])
   const stamp = (at: number) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   const paid = (data?.settings.buyInCents ?? 0) > 0
   const text = data ? [
@@ -378,11 +379,11 @@ function HistoryCard({ code, onClose, startOn = 'log' }: { code: string; onClose
 }
 
 function PastTables() {
-  const [tables, setTables] = useState<{ code: string; at: number }[]>([])
+  const [tables, setTables] = useState<{ code: string; at: number; host: boolean }[]>([])
   const [open, setOpen] = useState<string | null>(null)
   useEffect(() => {
     let live = true
-    void api('myTables').then((r) => { if (live && r.ok) setTables((r as unknown as { tables: { code: string; at: number }[] }).tables ?? []) })
+    void api('myTables').then((r) => { if (live && r.ok) setTables((r as unknown as { tables: { code: string; at: number; host: boolean }[] }).tables ?? []) })
     return () => { live = false }
   }, [])
   if (!tables.length) return null
@@ -397,18 +398,18 @@ function PastTables() {
         </button>
       ))}
     </div>
-    {open && <PastTable code={open} onClose={() => setOpen(null)} />}
+    {open && <PastTable code={open} isHost={tables.find((x) => x.code === open)?.host ?? false} onClose={() => setOpen(null)} />}
     </>
   )
 }
 
 /** A finished table: history and final standings only. There is no way to join from here. */
-function PastTable({ code, onClose }: { code: string; onClose: () => void }) {
+function PastTable({ code, isHost, onClose }: { code: string; isHost: boolean; onClose: () => void }) {
   const [view, setView] = useState<'menu' | 'history' | 'settle' | 'final'>('menu')
   const [final, setFinal] = useState<{ pub: import('./engine/table.ts').PublicTable | null } | null>(null)
   const openFinal = () => {
     setView('final')
-    void api('history', { code }).then((r) => setFinal({ pub: r.ok ? (r as unknown as { history: HistoryData }).history.final : null }))
+    void api('summary', { code }).then((r) => setFinal({ pub: r.ok ? (r as unknown as { history: HistoryData }).history.final : null }))
   }
   if (view === 'history') return <HistoryCard code={code} onClose={onClose} />
   if (view === 'settle') return <HistoryCard code={code} onClose={onClose} startOn="settle" />
@@ -434,7 +435,7 @@ function PastTable({ code, onClose }: { code: string; onClose: () => void }) {
     <Modal onClose={onClose}>
       <h2 className="text-lg font-bold mb-3 font-mono tracking-widest">{code}</h2>
       <div className="grid gap-2">
-        <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setView('history')}>History</button>
+        {isHost && <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setView('history')}>History</button>}
         <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setView('settle')}>Settlement</button>
         <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={openFinal}>Final standings</button>
         <button className="rounded-xl px-4 py-2 text-white/60" onClick={onClose}>Close</button>

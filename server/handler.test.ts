@@ -20,7 +20,7 @@ function memoryStore(): Store & { tables: Map<string, string>; pres: Map<string,
     },
     async loadTable(code) { const r = tables.get(code); return r ? (JSON.parse(r) as Table) : null },
     async ledger(code, since) { return (ledgers.get(code) ?? []).filter((e) => e.at >= since) },
-    async hostTables() { return [] },
+    async hostTables() { return [] as { code: string; at: number; host: boolean }[] },
     async ping(code, uid, now) { pres.set(code, { ...(pres.get(code) ?? {}), [uid]: now }) },
   }
 }
@@ -76,5 +76,19 @@ describe('history', () => {
     const lines = (r.history as { entries: { lines: string[] }[] }).entries.flatMap((e) => e.lines)
     expect(lines.some((l) => l.includes('Bob leaves with 2,000 chips'))).toBe(true)
     expect(lines.some((l) => l.includes('Ann sits'))).toBe(true)
+  })
+  it('lets every player see the standings after leaving, but not strangers or the full log', async () => {
+    const store = memoryStore()
+    const now = 1_000_000
+    const deps = { store, now: () => now }
+    await handle('a', { type: 'create' }, { ...deps, newCode: () => 'ABCDE' })
+    await handle('a', { type: 'sit', code: 'ABCDE', name: 'Ann' }, deps)
+    await handle('b', { type: 'sit', code: 'ABCDE', name: 'Bob' }, deps)
+    await handle('b', { type: 'leave', code: 'ABCDE' }, deps)
+    const mine = await handle('b', { type: 'summary', code: 'ABCDE' }, deps)
+    expect(mine.ok).toBe(true)
+    expect((mine.history as { leaderboard: unknown[] }).leaderboard).toHaveLength(2)
+    expect((await handle('zed', { type: 'summary', code: 'ABCDE' }, deps)).ok).toBe(false)
+    expect((await handle('b', { type: 'history', code: 'ABCDE' }, deps)).ok).toBe(false)
   })
 })
