@@ -202,7 +202,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   }, [myTurn, pub.seq, pub.handId])
   const holeOk = live.hole && live.hole.handId === pub.handId ? live.hole.cards : null
   const boardY = cy + 0.02 * h
-  const potSpot = { x: cx, y: boardY - boardCw * 0.7 - 22 }
+  const potSpot = { x: cx, y: boardY - boardCw * 0.7 - 38 }
 
   // ----- board card animation parameters -----
   const group = (i: number) => (i < 3 ? 0 : i - 2)
