@@ -194551,7 +194551,7 @@ function rename(t2, uid, rawName) {
 }
 function showHand(t2, uid) {
   const hi = handIdx(t2, uid);
-  if (t2.phase !== "handOver" || !t2.hand || hi < 0) fail("Nothing to show");
+  if (!t2.hand || hi < 0 || t2.phase !== "handOver" && !t2.hand.players[hi].folded) fail("Nothing to show");
   if (t2.shown.includes(uid)) return;
   t2.shown.push(uid);
   const hp = t2.hand.players[hi];
@@ -194756,7 +194756,7 @@ function publicView(t2, now) {
       allIn: !!hp?.allIn,
       bet: hp && t2.phase === "betting" ? hp.bet : 0,
       lastAction: hp ? hp.lastAction : "",
-      cards: hp && (reveal && !hp.folded || t2.phase === "handOver" && t2.shown.includes(s2.uid)) ? hp.hole : null,
+      cards: hp && (reveal && !hp.folded || t2.shown.includes(s2.uid) && (t2.phase === "handOver" || hp.folded)) ? hp.hole : null,
       away: false
     };
   });

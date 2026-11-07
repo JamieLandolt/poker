@@ -362,7 +362,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
       {/* actions */}
       {!readOnly && <div className="flex-none min-h-[72px]">
-        {myPub && pub.phase === 'handOver' && myPub.inHand && !myPub.cards && holeOk && (
+        {myPub && (pub.phase === 'handOver' || myPub.folded) && myPub.inHand && !myPub.cards && holeOk && (
           <div className="text-center mb-1">
             <button className="rounded-xl px-5 py-2 font-semibold bg-white/10 hover:bg-white/15" disabled={busy} onClick={() => send('show')}>Show cards</button>
           </div>

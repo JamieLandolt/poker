@@ -363,10 +363,10 @@ export function rename(t: Table, uid: string, rawName: unknown): void {
 
 // ---------- playing ----------
 
-/** After a hand, a player may turn their cards face up for everyone. */
+/** After a hand, or as soon as they fold, a player may turn their cards face up for everyone. */
 export function showHand(t: Table, uid: string): void {
   const hi = handIdx(t, uid)
-  if (t.phase !== 'handOver' || !t.hand || hi < 0) fail('Nothing to show')
+  if (!t.hand || hi < 0 || (t.phase !== 'handOver' && !t.hand.players[hi].folded)) fail('Nothing to show')
   if (t.shown.includes(uid)) return
   t.shown.push(uid)
   const hp = t.hand!.players[hi]
@@ -619,7 +619,7 @@ export function publicView(t: Table, now: number): PublicTable {
       inHand: !!hp, folded: !!hp?.folded, allIn: !!hp?.allIn,
       bet: hp && t.phase === 'betting' ? hp.bet : 0,
       lastAction: hp ? hp.lastAction : '',
-      cards: hp && ((reveal && !hp.folded) || (t.phase === 'handOver' && t.shown.includes(s.uid))) ? hp.hole : null,
+      cards: hp && ((reveal && !hp.folded) || (t.shown.includes(s.uid) && (t.phase === 'handOver' || hp.folded))) ? hp.hole : null,
       away: false,
     }
   })

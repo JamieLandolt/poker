@@ -484,3 +484,18 @@ describe('final standings snapshot', () => {
     expect(b.t.finalSnap?.seats.filter(Boolean)).toHaveLength(2)
   })
 })
+
+describe('showing on a fold', () => {
+  it('a player who folded can show right away, others cannot until the hand ends', () => {
+    const { t, now } = setup(3)
+    const a = actor(t)
+    const other = t.hand!.players.find((p) => p.uid !== a)!.uid
+    expect(() => showHand(t, a)).toThrow(TableError)
+    act(t, a, { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'fold' }, now)
+    expect(t.phase).toBe('betting')
+    expect(() => showHand(t, other)).toThrow(TableError)
+    showHand(t, a)
+    expect(publicView(t, now).seats.find((x) => x?.uid === a)!.cards).toHaveLength(2)
+    expect(publicView(t, now).seats.find((x) => x?.uid === other)!.cards).toBeNull()
+  })
+})
