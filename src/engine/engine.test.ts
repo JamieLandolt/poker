@@ -292,3 +292,76 @@ describe('property: random play', () => {
     }
   }
 })
+
+describe('payouts against an independent oracle', () => {
+  /** Slow, obvious payout calculation: walk the contribution levels and hand each slice to the best eligible hand. */
+  function oraclePayouts(s: HandState): Record<number, number> {
+    const ps = s.players
+    const out: Record<number, number> = {}
+    const give = (id: number, n: number) => { out[id] = (out[id] ?? 0) + n }
+    const totals = ps.map((p) => p.total)
+    const sortedDesc = [...totals].sort((a, b) => b - a)
+    const cap = sortedDesc.length > 1 ? sortedDesc[1] : sortedDesc[0] // the top bet is only matched up to the second highest
+    const topIdx = totals.indexOf(sortedDesc[0])
+    if (sortedDesc.length > 1 && sortedDesc[0] > sortedDesc[1]) give(topIdx, sortedDesc[0] - sortedDesc[1])
+    const eff = totals.map((t) => Math.min(t, cap))
+    const levels = [...new Set(eff.filter((t) => t > 0))].sort((a, b) => a - b)
+    const liveLevels = [...new Set(ps.filter((p) => !p.folded).map((p) => eff[p.id]))].filter((t) => t > 0)
+    const topLive = Math.max(...liveLevels)
+    const order = Array.from({ length: ps.length }, (_, i) => (s.button + 1 + i) % ps.length)
+    let prev = 0
+    for (const level of levels) {
+      const amount = eff.reduce((a, t) => a + Math.max(0, Math.min(t, level) - prev), 0)
+      // chips from folded players above the highest live stack go to the last live pot
+      const extra = level === topLive ? eff.reduce((a, t) => a + Math.max(0, t - Math.max(topLive, prev)), 0) - eff.reduce((a, t) => a + Math.max(0, Math.min(t, level) - Math.max(prev, topLive)), 0) : 0
+      void extra
+      const eligible = ps.filter((p) => !p.folded && eff[p.id] >= level)
+      if (!eligible.length) { prev = level; continue }
+      let best = eligible.filter(() => true)
+      if (eligible.length > 1) {
+        const sc = new Map(eligible.map((p) => [p.id, evaluate([...p.hole, ...s.board])]))
+        let top = eligible[0].id
+        for (const p of eligible) if (compareScores(sc.get(p.id)!, sc.get(top)!) > 0) top = p.id
+        best = eligible.filter((p) => compareScores(sc.get(p.id)!, sc.get(top)!) === 0)
+      }
+      const ids = order.filter((id) => best.some((b) => b.id === id))
+      const base = Math.floor(amount / ids.length)
+      let rem = amount - base * ids.length
+      for (const id of ids) { give(id, base + (rem > 0 ? 1 : 0)); if (rem > 0) rem-- }
+      prev = level
+    }
+    // folded chips above the highest live level (rare) go to the last pot's winners: only checked via conservation
+    return out
+  }
+
+  it('matches on random hands with many all-ins and folds', () => {
+    const rng = seeded(99)
+    let checked = 0
+    for (let h = 0; h < 1500; h++) {
+      const n = 2 + Math.floor(rng() * 8)
+      const stacks = Array.from({ length: n }, () => 100 + Math.floor(rng() * 40) * 50)
+      let s = deal(stacks, Math.floor(rng() * n), shuffle(newDeck(), rng))
+      const before = stacks.reduce((a, b) => a + b, 0)
+      let guard = 0
+      while (s.phase === 'betting' && guard++ < 200) {
+        const lg = legalActions(s, s.toAct)
+        const x = rng()
+        let kind: ActKind = lg.canCheck ? 'check' : 'call'
+        if (x < 0.25 && lg.canAllIn) kind = 'allin'
+        else if (x < 0.45 && lg.canRaise) kind = 'raise'
+        else if (x > 0.88 && !lg.canCheck) kind = 'fold'
+        s = act(s, kind, kind === 'raise' ? lg.minRaiseTo : undefined)
+      }
+      expect(s.phase).toBe('handOver')
+      expect(s.players.reduce((a, p) => a + p.stack, 0)).toBe(before)
+      if (!s.result?.showdown) continue
+      // only compare when no folded player has more in than the best live one (the rare leftover case)
+      const maxLive = Math.max(...s.players.filter((p) => !p.folded).map((p) => p.total))
+      if (s.players.some((p) => p.folded && p.total > maxLive)) continue
+      const want = oraclePayouts(s)
+      for (const p of s.players) expect(s.result.payouts[p.id] ?? 0).toBe(want[p.id] ?? 0)
+      checked++
+    }
+    expect(checked).toBeGreaterThan(300)
+  })
+})

@@ -78,7 +78,7 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 /* ---------- chips ---------- */
 .chip {
   display: inline-block; width: 24px; height: 24px; border-radius: 50%; flex: none;
-  background: radial-gradient(circle closest-side, var(--c, #dc2626) 0 58%, rgba(255,255,255,.92) 59% 68%, var(--c, #dc2626) 69%);
+  background: radial-gradient(circle closest-side, var(--c, #dc2626) 0 74%, rgba(255,255,255,.92) 75% 85%, var(--c, #dc2626) 86%);
   border: 3px dashed rgba(255,255,255,.9);
   box-shadow: 0 2px 5px rgba(0,0,0,.55);
 }
@@ -207,7 +207,7 @@ select {
   .pot-num { font-size: 1.25rem; }
   .pot-label { font-size: 8px; }
   .badge { min-width: 17px; height: 17px; font-size: 9px; }
-  .chip { width: 18px; height: 18px; border-width: 2.5px; }
+  .chip { width: 18px; height: 18px; border-width: 2.25px; }
   body { padding-bottom: env(safe-area-inset-bottom); }
 }
 
