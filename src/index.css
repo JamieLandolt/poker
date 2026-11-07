@@ -77,11 +77,18 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 
 /* ---------- chips ---------- */
 .chip {
-  display: inline-block; width: 24px; height: 24px; border-radius: 50%; flex: none;
-  background: radial-gradient(circle closest-side, var(--c, #dc2626) 0 74%, rgba(255,255,255,.92) 75% 85%, var(--c, #dc2626) 86%);
-  border: 3px dashed rgba(255,255,255,.9);
+  position: relative; display: inline-block; width: 24px; height: 24px; border-radius: 50%; flex: none;
+  background: var(--c, #dc2626);
   box-shadow: 0 2px 5px rgba(0,0,0,.55);
 }
+/* Eight evenly spaced edge blocks, then the inner ring. Drawn with masks so no curved arcs appear. */
+.chip::before, .chip::after { content: ''; position: absolute; inset: 0; border-radius: 50%; }
+.chip::before {
+  background: repeating-conic-gradient(from -11.25deg, rgba(255,255,255,.92) 0 22.5deg, transparent 22.5deg 45deg);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 0 76%, #000 77%);
+  mask: radial-gradient(circle closest-side, transparent 0 76%, #000 77%);
+}
+.chip::after { background: radial-gradient(circle closest-side, transparent 0 56%, rgba(255,255,255,.92) 57% 65%, transparent 66%); }
 .chip-fly { animation: chipFly .7s cubic-bezier(.3,.8,.3,1) var(--d, 0s) backwards; }
 @keyframes sweep { 0%, 50% { transform: none; opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(.5); opacity: 0; } }
 .chip-sweep { animation: sweep 1.4s ease-in forwards; }
@@ -207,7 +214,7 @@ select {
   .pot-num { font-size: 1.25rem; }
   .pot-label { font-size: 8px; }
   .badge { min-width: 17px; height: 17px; font-size: 9px; }
-  .chip { width: 18px; height: 18px; border-width: 2.25px; }
+  .chip { width: 18px; height: 18px; }
   body { padding-bottom: env(safe-area-inset-bottom); }
 }
 
