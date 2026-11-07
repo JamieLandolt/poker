@@ -308,6 +308,9 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
             const delay = (c * nDeal + dealIdx) * DEAL_STEP
             return { dx: deck.x - p.x, dy: deck.y - p.y, rot: -40 + c * 25, delay, flipAt: isMe ? dealTotal + 150 : undefined }
           }
+          // The winning hand slides toward the middle and grows so everyone can read it.
+          const showWin = winners.has(s.seat) && !!pub.result?.showdown && (isMe ? !!holeOk : !!s.cards)
+          const push = Math.min(56, toC * 0.22)
           const isTurn = pub.toAct === s.seat && pub.phase === 'betting'
           const dur = pub.settings.turnSecs
           const clock = pub.paused && pub.pausedAt ? pub.pausedAt : serverNow
@@ -317,7 +320,10 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
             <div key={i}>
               <div className={cls} style={{ left: p.x, top: p.y, ['--sw' as string]: `${sw}px`, ['--dur' as string]: `${dur}s`, ['--delay' as string]: `-${Math.max(0, dur * 1000 - remaining) / 1000}s` }}>
                 {showCards && (
-                  <div className="flex justify-center gap-1" style={isMe ? { marginTop: -cardW * 0.6, marginBottom: 36, position: 'relative', zIndex: 3 } : revealed ? { marginBottom: 22, position: 'relative', zIndex: 3 } : { marginBottom: -cardW * 0.2, position: 'relative', zIndex: 1 }}>
+                  <div className={`flex justify-center gap-1${showWin ? ' win-cards' : ''}`} style={{
+                    ...(isMe ? { marginTop: -cardW * 0.6, marginBottom: 36, position: 'relative', zIndex: 3 } : revealed ? { marginBottom: 22, position: 'relative', zIndex: 3 } : { marginBottom: -cardW * 0.2, position: 'relative', zIndex: 1 }),
+                    ...(showWin ? { ['--wx' as string]: `${ux * push}px`, ['--wy' as string]: `${uy * push}px`, zIndex: 7 } : {}),
+                  }}>
                     {[0, 1].map((c) => {
                       const card = face(c)
                       const up = !!card
@@ -329,7 +335,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                   <div className="avatar" style={{ background: `hsl(${hue(s.uid)} 60% 42%)` }}>
                     {s.name.slice(0, 1).toUpperCase()}
                     {isTurn && (
-                      <svg className="ring" viewBox="0 0 40 40" key={`${pub.handId}-${pub.seq}-${pub.paused}`}>
+                      <svg className="turn-ring" viewBox="0 0 40 40" key={`${pub.handId}-${pub.seq}-${pub.paused}`}>
                         <circle className="bg" cx="20" cy="20" r="18" pathLength={100} />
                         <circle className="fg" cx="20" cy="20" r="18" pathLength={100} style={{ ['--dur' as string]: `${dur}s`, ['--delay' as string]: `-${Math.max(0, dur * 1000 - remaining) / 1000}s` }} />
                       </svg>
@@ -380,7 +386,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
       {/* actions */}
       {!readOnly && <div className="flex-none min-h-[72px]">
-        {myPub && (pub.phase === 'handOver' || myPub.folded) && myPub.inHand && !myPub.cards && holeOk && (
+        {myPub && pub.phase === 'handOver' && myPub.inHand && !myPub.cards && holeOk && (
           <div className="text-center mb-1">
             <button className="rounded-xl px-5 py-2 font-semibold bg-white/10 hover:bg-white/15" disabled={busy} onClick={() => send('show')}>Show cards</button>
           </div>
@@ -449,8 +455,8 @@ function ActionBar({ pub, lg: realLg, myStack, myBet = 0, busy, premove, onAct }
   const valid = isInt && !tooSmall && !tooBig
   const bb = Math.max(1, pub.settings.bigBlind)
   const setClamped = (v: number) => setAmount(String(Math.min(lg.maxRaiseTo, Math.max(lg.minRaiseTo, Math.round(v)))))
-  // Presets land on whole big blinds (nobody wants to bet one extra chip); min and max stay exact.
-  const potRaise = (f: number) => setClamped(Math.round((pub.currentBet + f * (pub.pot + lg.callAmount)) / bb) * bb)
+  // Presets land on the nearest 5 chips; min and max stay exact.
+  const potRaise = (f: number) => setClamped(Math.round((pub.currentBet + f * (pub.pot + lg.callAmount)) / 5) * 5)
   // The slider moves in big blinds and snaps to all-in when it gets within one step of the end.
   const onSlide = (v: number) => setAmount(String(lg.maxRaiseTo - v < bb ? lg.maxRaiseTo : v))
   const btn = 'rounded-xl px-4 py-3 font-bold text-sm sm:text-base transition-[scale,opacity,filter] duration-150 ease-out enabled:active:scale-[0.96] disabled:opacity-40'

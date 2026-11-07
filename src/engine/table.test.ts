@@ -167,12 +167,13 @@ describe('rebuy and leaderboard', () => {
     const { t } = setup(3)
     expect(() => rebuy(t, 'u0')).toThrow(TableError)
   })
-  it('rejoining after leaving counts a second buy-in and net stays right', () => {
+  it('rejoining after leaving brings the same chips back and net stays right', () => {
     const t = createTable('ABCDE', 'u0', S, 0)
     sit(t, 'u0', 'A', undefined, 0)
     leave(t, 'u0', 1)
     sit(t, 'u0', 'A', undefined, 2)
-    expect(t.records.u0.buyIns).toBe(2)
+    expect(t.records.u0.buyIns).toBe(1)
+    expect(t.seats[seatOf(t, 'u0')]!.stack).toBe(S.startStack)
     const lb = publicView(t, 3).leaderboard.find((r) => r.uid === 'u0')!
     expect(lb.net).toBe(0)
     check(t)
@@ -184,13 +185,13 @@ describe('money ratio', () => {
     const t = createTable('ABCDE', 'u0', S, 0)
     sit(t, 'u0', 'A', undefined, 0)
     expect(t.records.u0.paidCents).toBe(200)
-    leave(t, 'u0', 1)
-    sit(t, 'u0', 'A', undefined, 2)
+    t.seats[seatOf(t, 'u0')]!.stack = 0
+    rebuy(t, 'u0')
     expect(t.records.u0.paidCents).toBe(400)
     // 1000 chips for $2: ending with 3000 chips is worth $6 -> net +$2 on $4 paid after a second 1000-chip buy-in
     t.seats[seatOf(t, 'u0')]!.stack = 3000
     const lb = publicView(t, 3).leaderboard[0]
-    expect(lb.netCents).toBe(Math.round((3000 + 1000) * 0.2) - 400)
+    expect(lb.netCents).toBe(Math.round(3000 * 0.2) - 400)
   })
 })
 
@@ -291,14 +292,14 @@ describe('regressions from the bug pass', () => {
     expect(publicView(t, 1).leaderboard.map((r) => r.netCents)).toEqual([0, 0])
   })
   it('money stays zero-sum with several buy-ins at different rates', () => {
-    const t = createTable('ABCDE', 'u0', S, 0) // $2 for 1000 chips
+    const t = createTable('ABCDE', 'u0', { ...S, startStack: 1000 }, 0) // $2 for 1000 chips
     sit(t, 'u0', 'A', undefined, 0)
-    leave(t, 'u0', 1)
+    t.seats[seatOf(t, 'u0')]!.stack = 0 // A busts
     t.settings.startStack = 4000 // later $2 buys 4000
-    sit(t, 'u0', 'A', undefined, 2) // A's second buy-in
+    rebuy(t, 'u0') // A's second buy-in
     sit(t, 'u1', 'B', undefined, 2)
     expect(t.records.u0.buyIns).toBe(2)
-    t.seats[seatOf(t, 'u0')]!.stack = 6000 // with the 1000 already cashed out, A holds 7000
+    t.seats[seatOf(t, 'u0')]!.stack = 7000 // 1000 + 4000 + 4000 chips bought in total
     t.seats[seatOf(t, 'u1')]!.stack = 2000
     const rows = publicView(t, 3).leaderboard
     expect(rows.reduce((a, r) => a + r.netCents, 0)).toBeGreaterThanOrEqual(-1)
@@ -503,17 +504,31 @@ describe('final standings snapshot', () => {
 })
 
 describe('showing on a fold', () => {
-  it('a player who folded can show right away, others cannot until the hand ends', () => {
+  it('nobody can show while the hand is still running, even after folding', () => {
     const { t, now } = setup(3)
     const a = actor(t)
-    const other = t.hand!.players.find((p) => p.uid !== a)!.uid
-    expect(() => showHand(t, a)).toThrow(TableError)
     act(t, a, { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'fold' }, now)
     expect(t.phase).toBe('betting')
-    expect(() => showHand(t, other)).toThrow(TableError)
-    showHand(t, a)
-    expect(publicView(t, now).seats.find((x) => x?.uid === a)!.cards).toHaveLength(2)
-    expect(publicView(t, now).seats.find((x) => x?.uid === other)!.cards).toBeNull()
+    expect(() => showHand(t, a)).toThrow(TableError)
+    expect(publicView(t, now).seats.find((x) => x?.uid === a)!.cards).toBeNull()
+  })
+})
+
+describe('re-sitting', () => {
+  it('a player who left sits back down with the chips they left with, not a new buy-in', () => {
+    const { t, now } = setup(2)
+    const a = actor(t)
+    act(t, a, { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'fold' }, now)
+    const left = t.seats.find((x) => x?.uid === a)!.stack
+    leave(t, a, now)
+    const paid = t.records[a].paidCents
+    sit(t, a, 'Back', undefined, now)
+    const s = t.seats.find((x) => x?.uid === a)!
+    expect(s.stack).toBe(left)
+    expect(t.records[a].buyIns).toBe(1)
+    expect(t.records[a].paidCents).toBe(paid)
+    expect(t.records[a].cashedOut).toBe(0)
+    expect(t.ledger.some((l) => l.includes('returns') && !l.includes('buys in'))).toBe(true)
   })
 })
 

@@ -29,19 +29,20 @@ export const firestoreStore: Store = {
     const db = getFirestore(app())
     const tableRef = db.doc(`tables/${code}`)
     const secretRef = db.doc(`tables/${code}/secret/state`)
-    const presenceCol = db.collection(`tables/${code}/presence`)
+    // One presence doc per table (a map of uid -> last ping) so each request costs two reads, not one per player.
+    const presenceRef = db.doc(`tables/${code}/meta/presence`)
     return db.runTransaction(async (tx) => {
-      const [secret, presence] = await Promise.all([tx.get(secretRef), tx.get(presenceCol)])
+      const [secret, presence] = await Promise.all([tx.get(secretRef), tx.get(presenceRef)])
       const table: Table | null = secret.exists ? (JSON.parse(secret.data()!.json as string) as Table) : null
       const pres: Record<string, number> = {}
-      presence.forEach((d) => { pres[d.id] = Number(d.data().t) || 0 })
+      for (const [k, v] of Object.entries(presence.data() ?? {})) pres[k] = Number(v) || 0
       const prevHandId = table?.hand?.handId ?? 0
       const { table: next, result } = fn({ table, presence: pres })
       if (next) {
         const now = Date.now()
         if (next.ledger.length) {
-          // Permanent record: one doc per change, kept for a month, readable by the host through the API only.
-          tx.set(db.doc(`tables/${code}/ledger/${String(next.version).padStart(9, '0')}`), { at: now, lines: next.ledger })
+          // Permanent record: one doc per hand holding every change in it, kept for a month, readable by the host through the API only.
+          tx.set(db.doc(`tables/${code}/ledger/h${String(next.handCount).padStart(8, '0')}`), { at: now, e: { [`v${String(next.version).padStart(9, '0')}`]: { at: now, lines: next.ledger } } }, { merge: true })
           for (const host of new Set([next.creatorUid, next.ownerUid])) tx.set(db.doc(`hosts/${host}/tables/${code}`), { code, at: now })
           next.ledger = []
         }
@@ -67,9 +68,12 @@ export const firestoreStore: Store = {
     const out: { at: number; lines: string[] }[] = []
     const stale: FirebaseFirestore.DocumentReference[] = []
     snap.forEach((d) => {
-      const at = Number(d.data().at)
-      if (at < since) stale.push(d.ref)
-      else out.push({ at, lines: d.data().lines as string[] })
+      const data = d.data()
+      const at = Number(data.at)
+      if (at < since) { stale.push(d.ref); return }
+      // Older tables have one doc per change; newer ones group the changes of a hand in one doc.
+      if (data.lines) out.push({ at, lines: data.lines as string[] })
+      else for (const k of Object.keys(data.e ?? {}).sort()) out.push(data.e[k] as { at: number; lines: string[] })
     })
     await Promise.all(stale.map((r) => r.delete())) // past the retention window
     return out
@@ -93,11 +97,8 @@ export const firestoreStore: Store = {
     return [...byCode].map(([code, v]) => ({ code, ...v })).filter((x) => x.at >= since).sort((a, b) => b.at - a.at)
   },
   async ping(code, uid, now) {
-    const db = getFirestore(app())
-    // Only seated players of an existing table may write presence (no orphan docs).
-    const pub = await db.doc(`tables/${code}`).get()
-    const seats = (pub.data()?.seats ?? []) as ({ uid: string } | null)[]
-    if (!pub.exists || !seats.some((x) => x?.uid === uid)) return
-    await db.doc(`tables/${code}/presence/${uid}`).set({ t: now })
+    // A blind write (no read): only uids that hold a seat are ever used from this map.
+    if (!/^[A-Z0-9]{4,8}$/.test(code)) return
+    await getFirestore(app()).doc(`tables/${code}/meta/presence`).set({ [uid]: now }, { merge: true })
   },
 }

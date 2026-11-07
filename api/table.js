@@ -194385,8 +194385,9 @@ function sit(t2, uid, rawName, wanted, now) {
   if (t2.seats[seat]) fail("That seat is taken");
   const rec = t2.records[uid];
   const finalName = uniqueName(t2, uid, name);
-  const stack = t2.settings.startStack;
-  t2.records[uid] = {
+  const back = rec && rec.cashedOut > 0 ? rec.cashedOut : 0;
+  const stack = back || t2.settings.startStack;
+  t2.records[uid] = back ? { ...rec, name: finalName, cashedOut: 0, seat } : {
     uid,
     name: finalName,
     invested: (rec?.invested ?? 0) + stack,
@@ -194402,7 +194403,7 @@ function sit(t2, uid, rawName, wanted, now) {
     t2.ownerUid = uid;
     note(t2, `${finalName} is now the host`);
   }
-  note(t2, `${finalName} sits at seat ${seat + 1}, buys in ${n(stack)}${cash(t2)} (buy-in ${t2.records[uid].buyIns})`);
+  note(t2, back ? `${finalName} returns to seat ${seat + 1} with ${n(stack)} chips` : `${finalName} sits at seat ${seat + 1}, buys in ${n(stack)}${cash(t2)} (buy-in ${t2.records[uid].buyIns})`);
   prune(t2);
   touch(t2);
 }
@@ -194569,7 +194570,7 @@ function rename(t2, uid, rawName) {
 }
 function showHand(t2, uid) {
   const hi = handIdx(t2, uid);
-  if (!t2.hand || hi < 0 || t2.phase !== "handOver" && !t2.hand.players[hi].folded) fail("Nothing to show");
+  if (!t2.hand || hi < 0 || t2.phase !== "handOver") fail("Nothing to show");
   if (t2.shown.includes(uid)) return;
   t2.shown.push(uid);
   const hp = t2.hand.players[hi];
@@ -194866,20 +194867,18 @@ var firestoreStore = {
     const db = getFirestore(app());
     const tableRef = db.doc(`tables/${code}`);
     const secretRef = db.doc(`tables/${code}/secret/state`);
-    const presenceCol = db.collection(`tables/${code}/presence`);
+    const presenceRef = db.doc(`tables/${code}/meta/presence`);
     return db.runTransaction(async (tx) => {
-      const [secret, presence] = await Promise.all([tx.get(secretRef), tx.get(presenceCol)]);
+      const [secret, presence] = await Promise.all([tx.get(secretRef), tx.get(presenceRef)]);
       const table2 = secret.exists ? JSON.parse(secret.data().json) : null;
       const pres = {};
-      presence.forEach((d) => {
-        pres[d.id] = Number(d.data().t) || 0;
-      });
+      for (const [k, v] of Object.entries(presence.data() ?? {})) pres[k] = Number(v) || 0;
       const prevHandId = table2?.hand?.handId ?? 0;
       const { table: next, result } = fn({ table: table2, presence: pres });
       if (next) {
         const now = Date.now();
         if (next.ledger.length) {
-          tx.set(db.doc(`tables/${code}/ledger/${String(next.version).padStart(9, "0")}`), { at: now, lines: next.ledger });
+          tx.set(db.doc(`tables/${code}/ledger/h${String(next.handCount).padStart(8, "0")}`), { at: now, e: { [`v${String(next.version).padStart(9, "0")}`]: { at: now, lines: next.ledger } } }, { merge: true });
           for (const host of /* @__PURE__ */ new Set([next.creatorUid, next.ownerUid])) tx.set(db.doc(`hosts/${host}/tables/${code}`), { code, at: now });
           next.ledger = [];
         }
@@ -194905,9 +194904,14 @@ var firestoreStore = {
     const out = [];
     const stale = [];
     snap.forEach((d) => {
-      const at = Number(d.data().at);
-      if (at < since) stale.push(d.ref);
-      else out.push({ at, lines: d.data().lines });
+      const data = d.data();
+      const at = Number(data.at);
+      if (at < since) {
+        stale.push(d.ref);
+        return;
+      }
+      if (data.lines) out.push({ at, lines: data.lines });
+      else for (const k of Object.keys(data.e ?? {}).sort()) out.push(data.e[k]);
     });
     await Promise.all(stale.map((r2) => r2.delete()));
     return out;
@@ -194930,11 +194934,8 @@ var firestoreStore = {
     return [...byCode].map(([code, v]) => ({ code, ...v })).filter((x2) => x2.at >= since).sort((a, b) => b.at - a.at);
   },
   async ping(code, uid, now) {
-    const db = getFirestore(app());
-    const pub = await db.doc(`tables/${code}`).get();
-    const seats = pub.data()?.seats ?? [];
-    if (!pub.exists || !seats.some((x2) => x2?.uid === uid)) return;
-    await db.doc(`tables/${code}/presence/${uid}`).set({ t: now });
+    if (!/^[A-Z0-9]{4,8}$/.test(code)) return;
+    await getFirestore(app()).doc(`tables/${code}/meta/presence`).set({ [uid]: now }, { merge: true });
   }
 };
 

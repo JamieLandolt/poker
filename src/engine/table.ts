@@ -199,15 +199,21 @@ export function sit(t: Table, uid: string, rawName: unknown, wanted: number | un
   if (t.seats[seat as number]) fail('That seat is taken')
   const rec = t.records[uid]
   const finalName = uniqueName(t, uid, name)
-  const stack = t.settings.startStack
-  t.records[uid] = {
-    uid, name: finalName, invested: (rec?.invested ?? 0) + stack, buyIns: (rec?.buyIns ?? 0) + 1,
-    paidCents: (rec?.paidCents ?? 0) + (t.settings.buyInCents ?? 0), cashedOut: rec?.cashedOut ?? 0, handsWon: rec?.handsWon ?? 0, biggestPot: rec?.biggestPot ?? 0, seat: seat as number,
-  }
+  // Someone coming back sits down with the chips they left with; only an empty-handed player buys in again.
+  const back = rec && rec.cashedOut > 0 ? rec.cashedOut : 0
+  const stack = back || t.settings.startStack
+  t.records[uid] = back
+    ? { ...rec!, name: finalName, cashedOut: 0, seat: seat as number }
+    : {
+        uid, name: finalName, invested: (rec?.invested ?? 0) + stack, buyIns: (rec?.buyIns ?? 0) + 1,
+        paidCents: (rec?.paidCents ?? 0) + (t.settings.buyInCents ?? 0), cashedOut: rec?.cashedOut ?? 0, handsWon: rec?.handsWon ?? 0, biggestPot: rec?.biggestPot ?? 0, seat: seat as number,
+      }
   t.seats[seat as number] = { uid, name: finalName, stack, status: 'active', timeouts: 0, leaving: false, lastSeen: now, afkHands: 0, idleSince: null }
   // A table whose host has gone gets a new host from the next person to sit down.
   if (!t.seats.some((x) => x?.uid === t.ownerUid)) { t.ownerUid = uid; note(t, `${finalName} is now the host`) }
-  note(t, `${finalName} sits at seat ${(seat as number) + 1}, buys in ${n(stack)}${cash(t)} (buy-in ${t.records[uid].buyIns})`)
+  note(t, back
+    ? `${finalName} returns to seat ${(seat as number) + 1} with ${n(stack)} chips`
+    : `${finalName} sits at seat ${(seat as number) + 1}, buys in ${n(stack)}${cash(t)} (buy-in ${t.records[uid].buyIns})`)
   prune(t)
   touch(t)
 }
@@ -381,7 +387,7 @@ export function rename(t: Table, uid: string, rawName: unknown): void {
 /** After a hand, or as soon as they fold, a player may turn their cards face up for everyone. */
 export function showHand(t: Table, uid: string): void {
   const hi = handIdx(t, uid)
-  if (!t.hand || hi < 0 || (t.phase !== 'handOver' && !t.hand.players[hi].folded)) fail('Nothing to show')
+  if (!t.hand || hi < 0 || t.phase !== 'handOver') fail('Nothing to show')
   if (t.shown.includes(uid)) return
   t.shown.push(uid)
   const hp = t.hand!.players[hi]
