@@ -137,7 +137,7 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const [logOpen, setLogOpen] = useState(() => lsGet(LOG_KEY) === '1')
   const [board, setBoard] = useState(false)
   const [settings, setSettings] = useState(false)
-  const [showHistory, setShowHistory] = useState(false)
+  const [showHistory, setShowHistory] = useState<null | 'log' | 'settle'>(null)
   const [copied, setCopied] = useState(false)
   const [menu, setMenu] = useState(false)
   const [codeCopied, setCodeCopied] = useState(false)
@@ -198,7 +198,8 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
           {joined && <button className={chip} onClick={toggleAfk}>{afk ? "I'm back" : 'Go AFK'}</button>}
           {joined && <button className={chip} onClick={doWatch}>Cash out and watch</button>}
           {joined && <button className={`${chip} !text-red-300`} onClick={doLeave}>Leave</button>}
-          {isHost && <button className={chip} onClick={() => setShowHistory(true)}>History</button>}
+          {isHost && <button className={chip} onClick={() => setShowHistory('log')}>History</button>}
+          {isHost && <button className={chip} onClick={() => setShowHistory('settle')}>Settlement</button>}
           {isOwner && <button className={chip} onClick={() => setSettings(true)}>⚙ Settings</button>}
           {isOwner && <button className={chip} onClick={togglePause}>{pub.paused ? '▶ Resume' : '⏸ Pause'}</button>}
         </span>
@@ -213,7 +214,8 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
         <div className="glass absolute right-0 top-full mt-2 z-40 p-2 flex flex-col gap-1.5 w-56 sm:hidden" style={{ background: 'rgba(16,20,32,.97)' }}>
           <button className={chip} onClick={() => { void copy(); setMenu(false) }}>{copied ? 'Link copied ✓' : 'Copy invite link'}</button>
           {joined && <button className={chip} onClick={() => { toggleAfk(); setMenu(false) }}>{afk ? "I'm back" : 'Go AFK'}</button>}
-          {isHost && <button className={chip} onClick={() => { setShowHistory(true); setMenu(false) }}>History</button>}
+          {isHost && <button className={chip} onClick={() => { setShowHistory('log'); setMenu(false) }}>History</button>}
+          {isHost && <button className={chip} onClick={() => { setShowHistory('settle'); setMenu(false) }}>Settlement</button>}
           {isOwner && <button className={chip} onClick={() => { setSettings(true); setMenu(false) }}>⚙ Settings</button>}
           {isOwner && <button className={chip} onClick={() => { togglePause(); setMenu(false) }}>{pub.paused ? '▶ Resume timers' : '⏸ Pause timers'}</button>}
           {joined && <button className={chip} onClick={() => { setMenu(false); doWatch() }}>Cash out and watch</button>}
@@ -261,13 +263,14 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
       {!joined && (
         <div className="flex flex-wrap justify-center gap-2 py-2 flex-none">
           <button className="rounded-xl px-6 py-3 font-bold bg-gradient-to-b from-emerald-400 to-yellow-300 text-black" onClick={() => { setWantSeat(undefined); setShowJoin(true) }}>Join this table</button>
-          {isHost && <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setShowHistory(true)}>History</button>}
+          {isHost && <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setShowHistory('log')}>History</button>}
+          {isHost && <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setShowHistory('settle')}>Settlement</button>}
           <button className="rounded-xl px-5 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => { location.hash = '' }}>Back to lobby</button>
         </div>
       )}
 
       {!joined && showJoin && <JoinCard code={code} seat={wantSeat} full={pub.seats.every(Boolean)} onClose={() => setShowJoin(false)} />}
-      {showHistory && <HistoryCard code={code} onClose={() => setShowHistory(false)} />}
+      {showHistory && <HistoryCard code={code} startOn={showHistory} onClose={() => setShowHistory(null)} />}
       {settings && <SettingsCard code={code} pub={pub} onClose={() => setSettings(false)} />}
     </div>
   )
@@ -276,7 +279,30 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
 type HistoryData = { final: import('./engine/table.ts').PublicTable | null; entries: { at: number; lines: string[] }[]; leaderboard: import('./engine/table.ts').PublicTable['leaderboard']; settings: import('./engine/table.ts').PublicTable['settings'] }
 
 /** Host-only record of everything that happened at the table, kept for a month. */
-function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
+/** Fewest payments that square everyone up: the biggest debtor pays the biggest creditor until both are settled. */
+function settlements(rows: HistoryData['leaderboard'], paid: boolean) {
+  const all = rows.map((r) => ({ name: r.name, v: paid ? r.netCents : r.net }))
+  // Rounding to whole cents can leave the total a cent or two off zero; put that on the biggest balance so the payments add up.
+  const off = all.reduce((a, r) => a + r.v, 0)
+  if (off !== 0 && all.length) all.reduce((m, r) => (Math.abs(r.v) > Math.abs(m.v) ? r : m)).v -= off
+  const bal = all.filter((r) => r.v !== 0)
+  const owe = bal.filter((r) => r.v < 0).map((r) => ({ ...r, v: -r.v })).sort((a, b) => b.v - a.v)
+  const get = bal.filter((r) => r.v > 0).sort((a, b) => b.v - a.v)
+  const out: { from: string; to: string; amount: number }[] = []
+  let i = 0, j = 0
+  while (i < owe.length && j < get.length) {
+    const amount = Math.min(owe[i].v, get[j].v)
+    if (amount > 0) out.push({ from: owe[i].name, to: get[j].name, amount })
+    owe[i].v -= amount
+    get[j].v -= amount
+    if (owe[i].v <= 0) i++
+    if (get[j].v <= 0) j++
+  }
+  return out
+}
+
+function HistoryCard({ code, onClose, startOn = 'log' }: { code: string; onClose: () => void; startOn?: 'log' | 'settle' }) {
+  const tab = startOn
   const [data, setData] = useState<HistoryData | null>(null)
   const [err, setErr] = useState('')
   const [copied, setCopied] = useState(false)
@@ -303,7 +329,7 @@ function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
     <div className="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm grid place-items-center p-4" onClick={onClose}>
       <div className="glass p-4 w-full max-w-2xl max-h-[88dvh] flex flex-col" style={{ background: 'rgba(16,20,32,.97)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-bold">History · {code}</h2>
+          <h2 className="text-lg font-bold">{tab === 'settle' ? 'Settlement' : 'History'} · {code}</h2>
           <div className="flex gap-2">
             {data && <button className="rounded-lg px-3 py-1 text-sm bg-white/10" onClick={copy}>{copied ? 'Copied' : 'Copy all'}</button>}
             <button className="text-white/60 px-1" onClick={onClose} aria-label="Close">✕</button>
@@ -311,7 +337,20 @@ function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
         </div>
         {err && <div className="text-red-300 text-sm">{err}</div>}
         {!data && !err && <div className="text-white/60 text-sm">Loading…</div>}
-        {data && (
+        {data && tab === 'settle' && (
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-2">
+            {settlements(data.leaderboard, paid).map((p, i) => (
+              <div key={i} className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2.5">
+                <span className="font-semibold truncate">{p.from}</span>
+                <span className="text-white/40">pays</span>
+                <span className="font-semibold truncate flex-1">{p.to}</span>
+                <span className="num font-bold text-amber-200">{paid ? money(p.amount) : `${p.amount.toLocaleString()} chips`}</span>
+              </div>
+            ))}
+            {!settlements(data.leaderboard, paid).length && <div className="text-white/60 text-sm">Everyone is square.</div>}
+          </div>
+        )}
+        {data && tab === 'log' && (
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-3">
             <div className="text-xs">
               <div className="flex gap-2 text-[10px] uppercase tracking-wide text-white/40 pb-1">
@@ -365,13 +404,14 @@ function PastTables() {
 
 /** A finished table: history and final standings only. There is no way to join from here. */
 function PastTable({ code, onClose }: { code: string; onClose: () => void }) {
-  const [view, setView] = useState<'menu' | 'history' | 'final'>('menu')
+  const [view, setView] = useState<'menu' | 'history' | 'settle' | 'final'>('menu')
   const [final, setFinal] = useState<{ pub: import('./engine/table.ts').PublicTable | null } | null>(null)
   const openFinal = () => {
     setView('final')
     void api('history', { code }).then((r) => setFinal({ pub: r.ok ? (r as unknown as { history: HistoryData }).history.final : null }))
   }
   if (view === 'history') return <HistoryCard code={code} onClose={onClose} />
+  if (view === 'settle') return <HistoryCard code={code} onClose={onClose} startOn="settle" />
   if (view === 'final') {
     return (
       <div className="fixed inset-0 z-30 bg-black/80 backdrop-blur-sm flex flex-col p-4" onClick={onClose}>
@@ -395,6 +435,7 @@ function PastTable({ code, onClose }: { code: string; onClose: () => void }) {
       <h2 className="text-lg font-bold mb-3 font-mono tracking-widest">{code}</h2>
       <div className="grid gap-2">
         <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setView('history')}>History</button>
+        <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={() => setView('settle')}>Settlement</button>
         <button className="rounded-xl px-4 py-3 font-semibold bg-white/10 hover:bg-white/15" onClick={openFinal}>Final standings</button>
         <button className="rounded-xl px-4 py-2 text-white/60" onClick={onClose}>Close</button>
       </div>

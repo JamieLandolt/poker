@@ -290,6 +290,23 @@ describe('regressions from the bug pass', () => {
     t.settings.startStack = 4000 // owner changes the rate later (same $2 now buys 4000)
     expect(publicView(t, 1).leaderboard.map((r) => r.netCents)).toEqual([0, 0])
   })
+  it('money stays zero-sum with several buy-ins at different rates', () => {
+    const t = createTable('ABCDE', 'u0', S, 0) // $2 for 1000 chips
+    sit(t, 'u0', 'A', undefined, 0)
+    leave(t, 'u0', 1)
+    t.settings.startStack = 4000 // later $2 buys 4000
+    sit(t, 'u0', 'A', undefined, 2) // A's second buy-in
+    sit(t, 'u1', 'B', undefined, 2)
+    expect(t.records.u0.buyIns).toBe(2)
+    t.seats[seatOf(t, 'u0')]!.stack = 6000 // with the 1000 already cashed out, A holds 7000
+    t.seats[seatOf(t, 'u1')]!.stack = 2000
+    const rows = publicView(t, 3).leaderboard
+    expect(rows.reduce((a, r) => a + r.netCents, 0)).toBeGreaterThanOrEqual(-1)
+    expect(rows.reduce((a, r) => a + r.netCents, 0)).toBeLessThanOrEqual(1)
+    const a = rows.find((r) => r.uid === 'u0')!
+    expect(a.paidCents).toBe(400)
+    expect(a.netCents).toBeGreaterThan(0)
+  })
 })
 
 describe('pause', () => {

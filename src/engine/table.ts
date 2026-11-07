@@ -213,11 +213,19 @@ export function sit(t: Table, uid: string, rawName: unknown, wanted: number | un
 /** Keep the records map bounded: drop the oldest players who are gone. */
 function prune(t: Table) {
   const gone = Object.values(t.records).filter((r) => r.seat === null)
-  if (Object.keys(t.records).length <= 30) return
-  for (const r of gone.slice(0, Object.keys(t.records).length - 30)) delete t.records[r.uid]
+  // Records hold the money owed, so they are kept generously.
+  if (Object.keys(t.records).length <= 200) return
+  for (const r of gone.slice(0, Object.keys(t.records).length - 200)) delete t.records[r.uid]
 }
 
 function touch(t: Table) { t.version++ }
+
+/** Cents per chip across the whole table. Chips change hands between players, so one shared price keeps the money zero-sum even if the buy-in price was changed part-way. */
+export function poolPerChip(t: Table): number {
+  let paid = 0, invested = 0
+  for (const r of Object.values(t.records)) { paid += r.paidCents ?? 0; invested += r.invested }
+  return invested > 0 ? paid / invested : 0
+}
 
 const n = (x: number) => x.toLocaleString('en-US')
 const cash = (t: Table) => ((t.settings.buyInCents ?? 0) > 0 ? ` $${((t.settings.buyInCents ?? 0) / 100).toFixed(2)}` : '')
@@ -230,7 +238,7 @@ function cashOutAndFree(t: Table, seat: number) {
   if (!s) return
   const rec = t.records[s.uid]
   if (rec) { rec.cashedOut += s.stack; rec.seat = null }
-  const perChip = rec && rec.invested > 0 ? (rec.paidCents ?? 0) / rec.invested : 0
+  const perChip = poolPerChip(t)
   note(t, `${s.name} leaves with ${n(s.stack)} chips${perChip > 0 ? ` ($${((s.stack * perChip) / 100).toFixed(2)})` : ''}`)
   t.seats[seat] = null
   // The table never ends up without an owner while someone is still sitting at it.
@@ -629,14 +637,14 @@ export function publicView(t: Table, now: number): PublicTable {
   const res = h?.result
   const mapIdsToSeat = (ids: number[]) => ids.map((id) => h!.players[id].seat)
   const board = h ? h.board : []
+  const pool = poolPerChip(t)
   const leaderboard = Object.values(t.records).map((r) => {
     const s = r.seat !== null ? t.seats[r.seat] : null
     const hi = s && h && t.phase === 'betting' ? handIdx(t, s.uid) : -1
     // chips already pushed into the pot this hand are still the player's
     const stack = (s?.stack ?? 0) + (hi >= 0 ? h!.players[hi].total : 0)
     const paid = r.paidCents ?? 0
-    // Chips are worth what the player paid per chip on average, so changing the table's rate later never rewrites history.
-    const perChip = r.invested > 0 ? paid / r.invested : 0
+    const perChip = pool
     return { uid: r.uid, name: r.name, buyIns: r.buyIns, invested: r.invested, cashedOut: r.cashedOut, cashedOutCents: Math.round(r.cashedOut * perChip), stack, net: stack + r.cashedOut - r.invested, paidCents: paid, netCents: Math.round((stack + r.cashedOut) * perChip) - paid, handsWon: r.handsWon, biggestPot: r.biggestPot, seated: !!s }
   }).sort((a, b) => b.net - a.net)
   return {

@@ -194404,11 +194404,19 @@ function sit(t2, uid, rawName, wanted, now) {
 }
 function prune(t2) {
   const gone = Object.values(t2.records).filter((r2) => r2.seat === null);
-  if (Object.keys(t2.records).length <= 30) return;
-  for (const r2 of gone.slice(0, Object.keys(t2.records).length - 30)) delete t2.records[r2.uid];
+  if (Object.keys(t2.records).length <= 200) return;
+  for (const r2 of gone.slice(0, Object.keys(t2.records).length - 200)) delete t2.records[r2.uid];
 }
 function touch(t2) {
   t2.version++;
+}
+function poolPerChip(t2) {
+  let paid = 0, invested = 0;
+  for (const r2 of Object.values(t2.records)) {
+    paid += r2.paidCents ?? 0;
+    invested += r2.invested;
+  }
+  return invested > 0 ? paid / invested : 0;
 }
 var n = (x2) => x2.toLocaleString("en-US");
 var cash = (t2) => (t2.settings.buyInCents ?? 0) > 0 ? ` $${((t2.settings.buyInCents ?? 0) / 100).toFixed(2)}` : "";
@@ -194424,7 +194432,7 @@ function cashOutAndFree(t2, seat) {
     rec.cashedOut += s2.stack;
     rec.seat = null;
   }
-  const perChip = rec && rec.invested > 0 ? (rec.paidCents ?? 0) / rec.invested : 0;
+  const perChip = poolPerChip(t2);
   note(t2, `${s2.name} leaves with ${n(s2.stack)} chips${perChip > 0 ? ` ($${(s2.stack * perChip / 100).toFixed(2)})` : ""}`);
   t2.seats[seat] = null;
   if (s2.uid === t2.ownerUid) {
@@ -194766,12 +194774,13 @@ function publicView(t2, now) {
   const res = h2?.result;
   const mapIdsToSeat = (ids) => ids.map((id) => h2.players[id].seat);
   const board = h2 ? h2.board : [];
+  const pool = poolPerChip(t2);
   const leaderboard = Object.values(t2.records).map((r2) => {
     const s2 = r2.seat !== null ? t2.seats[r2.seat] : null;
     const hi = s2 && h2 && t2.phase === "betting" ? handIdx(t2, s2.uid) : -1;
     const stack = (s2?.stack ?? 0) + (hi >= 0 ? h2.players[hi].total : 0);
     const paid = r2.paidCents ?? 0;
-    const perChip = r2.invested > 0 ? paid / r2.invested : 0;
+    const perChip = pool;
     return { uid: r2.uid, name: r2.name, buyIns: r2.buyIns, invested: r2.invested, cashedOut: r2.cashedOut, cashedOutCents: Math.round(r2.cashedOut * perChip), stack, net: stack + r2.cashedOut - r2.invested, paidCents: paid, netCents: Math.round((stack + r2.cashedOut) * perChip) - paid, handsWon: r2.handsWon, biggestPot: r2.biggestPot, seated: !!s2 };
   }).sort((a, b) => b.net - a.net);
   return {
