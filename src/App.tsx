@@ -289,7 +289,7 @@ function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
   const paid = (data?.settings.buyInCents ?? 0) > 0
   const text = data ? [
     `Table ${code}`,
-    ...data.leaderboard.map((r) => `${r.name}: ${r.buyIns} buy-in${r.buyIns === 1 ? '' : 's'}, ${r.seated ? `${r.stack} chips on table` : `left with ${r.cashedOut}`}, net ${r.net}${paid ? `, ${money(r.netCents, true) || '$0'}` : ''}`),
+    ...data.leaderboard.map((r) => `${r.name}: ${r.buyIns} buy-in${r.buyIns === 1 ? '' : 's'}, ${r.seated ? `${r.stack} chips on table` : `left with ${r.cashedOut}${paid ? ` (${money(r.cashedOutCents)})` : ''}`}, net ${r.net}${paid ? `, ${money(r.netCents, true) || '$0'}` : ''}`),
     '',
     ...data.entries.flatMap((e) => e.lines.map((l) => `${stamp(e.at)}  ${l}`)),
   ].join('\n') : ''
@@ -311,12 +311,12 @@ function HistoryCard({ code, onClose }: { code: string; onClose: () => void }) {
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-3">
             <div className="text-xs">
               <div className="flex gap-2 text-[10px] uppercase tracking-wide text-white/40 pb-1">
-                <span className="flex-1">Player</span><span className="w-16 text-right">Chips</span><span className="w-16 text-right">Net</span>{paid && <span className="w-16 text-right">Profit</span>}
+                <span className="flex-1">Player</span><span className="w-20 text-right">Chips</span><span className="w-16 text-right">Net</span>{paid && <span className="w-16 text-right">Profit</span>}
               </div>
               {data.leaderboard.map((r) => (
                 <div key={r.uid} className="flex gap-2 py-1 border-t border-white/5 items-baseline">
                   <span className="flex-1 min-w-0 truncate">{r.name} <span className="text-white/40">{r.buyIns}×{paid ? ` ${money(r.paidCents)}` : ''}</span></span>
-                  <span className="w-16 text-right num">{r.seated ? r.stack.toLocaleString() : `left ${r.cashedOut.toLocaleString()}`}</span>
+                  <span className="w-20 text-right num">{r.seated ? r.stack.toLocaleString() : `left ${r.cashedOut.toLocaleString()}`}{!r.seated && paid && <span className="block text-white/50">{money(r.cashedOutCents)}</span>}</span>
                   <span className={`w-16 text-right num ${r.net > 0 ? 'text-emerald-300' : r.net < 0 ? 'text-rose-300' : ''}`}>{sign(r.net)}{r.net.toLocaleString()}</span>
                   {paid && <span className={`w-16 text-right num ${r.netCents > 0 ? 'text-emerald-300' : r.netCents < 0 ? 'text-rose-300' : ''}`}>{money(r.netCents, true) || '$0'}</span>}
                 </div>
@@ -456,7 +456,7 @@ function Leaderboard({ pub, uid, isOwner, code, onClose }: { pub: import('./engi
             <div className="min-w-0 flex-1">
               <div className="truncate font-semibold text-sm" title={r.name}>{r.name}{r.uid === uid ? ' (you)' : ''}</div>
               <div className="text-[11px] text-white/50 truncate">
-                {r.buyIns} buy-in{r.buyIns === 1 ? '' : 's'}{paid ? ` · ${money(r.paidCents)}` : ''}{!r.seated ? ' · left' : ''}
+                {r.buyIns} buy-in{r.buyIns === 1 ? '' : 's'}{paid ? ` · ${money(r.paidCents)}` : ''}{!r.seated ? ` · left with ${r.cashedOut.toLocaleString()}${paid ? ` (${money(r.cashedOutCents)})` : ''}` : ''}
               </div>
             </div>
             <div className="flex shrink-0 text-right num text-xs gap-2.5">

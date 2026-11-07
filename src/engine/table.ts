@@ -230,7 +230,8 @@ function cashOutAndFree(t: Table, seat: number) {
   if (!s) return
   const rec = t.records[s.uid]
   if (rec) { rec.cashedOut += s.stack; rec.seat = null }
-  note(t, `${s.name} leaves with ${n(s.stack)} chips`)
+  const perChip = rec && rec.invested > 0 ? (rec.paidCents ?? 0) / rec.invested : 0
+  note(t, `${s.name} leaves with ${n(s.stack)} chips${perChip > 0 ? ` ($${((s.stack * perChip) / 100).toFixed(2)})` : ''}`)
   t.seats[seat] = null
   // The table never ends up without an owner while someone is still sitting at it.
   if (s.uid === t.ownerUid) {
@@ -597,7 +598,7 @@ export interface PublicTable {
   /** Seats that can currently be dealt a hand (used so clients know when to nudge the table). */
   eligible: number
   result: null | { showdown: boolean; pots: { amount: number; winners: number[] }[]; payouts: Record<number, number>; hands: Record<number, string>; refund: { seat: number; amount: number } | null }
-  leaderboard: { uid: string; name: string; buyIns: number; invested: number; cashedOut: number; stack: number; net: number; paidCents: number; netCents: number; handsWon: number; biggestPot: number; seated: boolean }[]
+  leaderboard: { uid: string; name: string; buyIns: number; invested: number; cashedOut: number; cashedOutCents: number; stack: number; net: number; paidCents: number; netCents: number; handsWon: number; biggestPot: number; seated: boolean }[]
   log: string[]
   now: number
   version: number
@@ -636,7 +637,7 @@ export function publicView(t: Table, now: number): PublicTable {
     const paid = r.paidCents ?? 0
     // Chips are worth what the player paid per chip on average, so changing the table's rate later never rewrites history.
     const perChip = r.invested > 0 ? paid / r.invested : 0
-    return { uid: r.uid, name: r.name, buyIns: r.buyIns, invested: r.invested, cashedOut: r.cashedOut, stack, net: stack + r.cashedOut - r.invested, paidCents: paid, netCents: Math.round((stack + r.cashedOut) * perChip) - paid, handsWon: r.handsWon, biggestPot: r.biggestPot, seated: !!s }
+    return { uid: r.uid, name: r.name, buyIns: r.buyIns, invested: r.invested, cashedOut: r.cashedOut, cashedOutCents: Math.round(r.cashedOut * perChip), stack, net: stack + r.cashedOut - r.invested, paidCents: paid, netCents: Math.round((stack + r.cashedOut) * perChip) - paid, handsWon: r.handsWon, biggestPot: r.biggestPot, seated: !!s }
   }).sort((a, b) => b.net - a.net)
   return {
     code: t.code, ownerUid: t.ownerUid, creatorUid: t.creatorUid, settings: t.settings, pendingSettings: t.pendingSettings,

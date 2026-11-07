@@ -194273,8 +194273,14 @@ function finishHand(state, showdown) {
 var MAX_SEATS = 9;
 var GRACE_MS = 1e3;
 var AWAY_SIT_OUT_MS = 45e3;
-var NEXT_HAND_MS = 6e3;
-var NEXT_HAND_FOLD_MS = 3500;
+var NEXT_HAND_MS = 8e3;
+var NEXT_HAND_FOLD_MS = 8e3;
+function runoutMs(from, to) {
+  if (to <= from) return 0;
+  const grp = (i2) => i2 < 3 ? 0 : i2 - 2;
+  const last = to - 1;
+  return (grp(last) - grp(from)) * 900 + (last < 3 ? (last - from) * 160 : 0) + 700 + 380 + 1e3;
+}
 var AFK_KICK_MS = 30 * 6e4;
 var BUSTED_MAX_MS = 5 * 6e4;
 var DEFAULT_TABLE_SETTINGS = { smallBlind: 10, bigBlind: 20, startStack: 2e3, buyInCents: 0, turnSecs: 40 };
@@ -194418,7 +194424,8 @@ function cashOutAndFree(t2, seat) {
     rec.cashedOut += s2.stack;
     rec.seat = null;
   }
-  note(t2, `${s2.name} leaves with ${n(s2.stack)} chips`);
+  const perChip = rec && rec.invested > 0 ? (rec.paidCents ?? 0) / rec.invested : 0;
+  note(t2, `${s2.name} leaves with ${n(s2.stack)} chips${perChip > 0 ? ` ($${(s2.stack * perChip / 100).toFixed(2)})` : ""}`);
   t2.seats[seat] = null;
   if (s2.uid === t2.ownerUid) {
     const next = t2.seats.find((x2) => x2 && !x2.leaving) ?? t2.seats.find(Boolean);
@@ -194556,6 +194563,7 @@ function act(t2, uid, a, now) {
   if (t2.phase !== "betting" || !t2.hand) return false;
   const hi = handIdx(t2, uid);
   if (hi < 0) fail("You are not in this hand");
+  const boardBefore = t2.hand.board.length;
   const next = applyAction(t2.hand, { ...a, seat: hi });
   if (next === t2.hand) return false;
   t2.hand = next;
@@ -194565,10 +194573,10 @@ function act(t2, uid, a, now) {
     s2.timeouts = 0;
     s2.lastSeen = now;
   }
-  afterHandChange(t2, now, true);
+  afterHandChange(t2, now, true, boardBefore);
   return true;
 }
-function afterHandChange(t2, now, rearm = false) {
+function afterHandChange(t2, now, rearm = false, boardBefore = -1) {
   const h2 = t2.hand;
   for (const l of h2.log.slice(t2.ledgerHandLen)) note(t2, l);
   t2.ledgerHandLen = h2.log.length;
@@ -194576,7 +194584,7 @@ function afterHandChange(t2, now, rearm = false) {
     const si = seatOf(t2, p.uid);
     if (si >= 0) t2.seats[si].stack = p.stack;
   }
-  if (h2.phase === "handOver" && t2.phase !== "handOver") onHandOver(t2, now);
+  if (h2.phase === "handOver" && t2.phase !== "handOver") onHandOver(t2, now, boardBefore >= 0 ? runoutMs(boardBefore, h2.board.length) : 0);
   else if (h2.phase === "betting") {
     const actor = h2.toAct >= 0 ? h2.players[h2.toAct].uid : null;
     if (rearm || actor !== t2.actorUid || t2.deadline === null) {
@@ -194586,11 +194594,11 @@ function afterHandChange(t2, now, rearm = false) {
   }
   touch(t2);
 }
-function onHandOver(t2, now) {
+function onHandOver(t2, now, extraMs = 0) {
   const h2 = t2.hand;
   t2.phase = "handOver";
   t2.deadline = null;
-  t2.nextHandAt = now + (h2.result?.showdown ? NEXT_HAND_MS : NEXT_HAND_FOLD_MS);
+  t2.nextHandAt = now + (h2.result?.showdown ? NEXT_HAND_MS : NEXT_HAND_FOLD_MS) + extraMs;
   for (const p of h2.players) {
     const won = h2.result?.payouts[p.id] ?? 0;
     const rec = t2.records[p.uid];
@@ -194764,7 +194772,7 @@ function publicView(t2, now) {
     const stack = (s2?.stack ?? 0) + (hi >= 0 ? h2.players[hi].total : 0);
     const paid = r2.paidCents ?? 0;
     const perChip = r2.invested > 0 ? paid / r2.invested : 0;
-    return { uid: r2.uid, name: r2.name, buyIns: r2.buyIns, invested: r2.invested, cashedOut: r2.cashedOut, stack, net: stack + r2.cashedOut - r2.invested, paidCents: paid, netCents: Math.round((stack + r2.cashedOut) * perChip) - paid, handsWon: r2.handsWon, biggestPot: r2.biggestPot, seated: !!s2 };
+    return { uid: r2.uid, name: r2.name, buyIns: r2.buyIns, invested: r2.invested, cashedOut: r2.cashedOut, cashedOutCents: Math.round(r2.cashedOut * perChip), stack, net: stack + r2.cashedOut - r2.invested, paidCents: paid, netCents: Math.round((stack + r2.cashedOut) * perChip) - paid, handsWon: r2.handsWon, biggestPot: r2.biggestPot, seated: !!s2 };
   }).sort((a, b) => b.net - a.net);
   return {
     code: t2.code,
