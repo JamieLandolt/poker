@@ -132,6 +132,7 @@ export async function handle(uid: string, req: Request, deps: HandlerDeps): Prom
         case 'show': showHand(t, uid); break
         case 'pause': setPaused(t, uid, !!req.on, now); break
         case 'act': {
+          if (t.paused) throw new TableError('The game is paused')
           const kind = String(req.kind)
           if (!['fold', 'check', 'call', 'raise', 'allin'].includes(kind)) throw new TableError('Bad action')
           const applied = act(t, uid, {

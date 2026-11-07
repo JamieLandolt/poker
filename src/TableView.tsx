@@ -95,7 +95,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
         const last = pub.board.length - 1
         const grp = (i: number) => (i < 3 ? 0 : i - 2)
         const delay = (grp(last) - grp(from)) * 900 + (last < 3 ? (last - from) * 160 : 0) + 700
-        setHold({ handId: pub.handId, until: Date.now() + delay + 380 + 1000, stacks: Object.fromEntries(snap.seats.filter(Boolean).map((x) => [x!.seat, x!.stack])), pot: snap.pot })
+        setHold({ handId: pub.handId, until: Date.now() + delay + 380 + 1000, stacks: Object.fromEntries(pub.seats.filter(Boolean).map((x) => [x!.seat, x!.stack - (pub.result?.payouts[x!.seat] ?? 0)])), pot: (pub.result?.pots ?? []).reduce((t, p) => t + p.amount, 0) })
       }
     }
     setSnap(pub)
@@ -179,7 +179,8 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   const act = (kind: string, raiseTo?: number) => send('act', { handId: pub.handId, seq: pub.seq, kind, raiseTo })
 
   const myPub = mySeat >= 0 ? pub.seats[mySeat] : null
-  const myTurn = !!myPub && pub.toAct === mySeat && pub.phase === 'betting'
+  // No moves while the host has paused; queued moves wait for the resume.
+  const myTurn = !!myPub && pub.toAct === mySeat && pub.phase === 'betting' && !pub.paused
   // A queued move disappears when the hand moves on, or when someone raises after you queued a call/check/raise.
   const activePre = pre && pre.handId === pub.handId && pre.street === pub.street && (pre.kind === 'checkfold' || pre.facedBet === pub.currentBet) ? pre : null
   useEffect(() => {

@@ -22,7 +22,8 @@ export function buildPots(input: readonly Contribution[]): PotResult {
   let refund: PotResult['refund'] = null
 
   const sorted = players.slice().sort((a, b) => b.total - a.total)
-  if (sorted.length >= 2 && sorted[0].total > sorted[1].total) {
+  // Only a player still in the hand gets an unmatched bet back; a player who folded (left) forfeits it.
+  if (sorted.length >= 2 && sorted[0].total > sorted[1].total && !sorted[0].folded) {
     const amount = sorted[0].total - sorted[1].total
     sorted[0].total -= amount
     refund = { id: sorted[0].id, amount }

@@ -92,3 +92,23 @@ describe('history', () => {
     expect((await handle('b', { type: 'history', code: 'ABCDE' }, deps)).ok).toBe(false)
   })
 })
+
+describe('pause', () => {
+  it('rejects moves while paused', async () => {
+    const store = memoryStore()
+    let now = 1_000_000
+    const deps = { store, now: () => now }
+    await handle('a', { type: 'create' }, { ...deps, newCode: () => 'ABCDE' })
+    await handle('a', { type: 'sit', code: 'ABCDE', name: 'Ann' }, deps)
+    await handle('b', { type: 'sit', code: 'ABCDE', name: 'Bob' }, deps)
+    await handle('a', { type: 'tick', code: 'ABCDE' }, deps)
+    now += 5000
+    await handle('a', { type: 'tick', code: 'ABCDE' }, deps)
+    const t = JSON.parse(store.tables.get('ABCDE')!) as Table
+    expect(t.phase).toBe('betting')
+    await handle('a', { type: 'pause', code: 'ABCDE', on: true }, deps)
+    const actor = t.hand!.players[t.hand!.toAct].uid
+    const r = await handle(actor, { type: 'act', code: 'ABCDE', handId: t.hand!.handId, seq: t.hand!.seq, kind: 'call' }, deps)
+    expect(r).toEqual({ ok: false, error: 'The game is paused' })
+  })
+})

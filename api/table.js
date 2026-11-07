@@ -193974,7 +193974,7 @@ function buildPots(input) {
   const players = input.map((p) => ({ ...p }));
   let refund = null;
   const sorted = players.slice().sort((a, b) => b.total - a.total);
-  if (sorted.length >= 2 && sorted[0].total > sorted[1].total) {
+  if (sorted.length >= 2 && sorted[0].total > sorted[1].total && !sorted[0].folded) {
     const amount = sorted[0].total - sorted[1].total;
     sorted[0].total -= amount;
     refund = { id: sorted[0].id, amount };
@@ -194330,7 +194330,7 @@ function migrate(t2) {
   for (const s2 of t2.seats) {
     if (!s2) continue;
     s2.afkHands ??= 0;
-    s2.idleSince ??= null;
+    s2.idleSince ??= s2.status === "sitOut" ? s2.lastSeen : null;
     s2.timeouts ??= 0;
     s2.leaving ??= false;
   }
@@ -194398,14 +194398,17 @@ function sit(t2, uid, rawName, wanted, now) {
     seat
   };
   t2.seats[seat] = { uid, name: finalName, stack, status: "active", timeouts: 0, leaving: false, lastSeen: now, afkHands: 0, idleSince: null };
+  if (!t2.seats.some((x2) => x2?.uid === t2.ownerUid)) {
+    t2.ownerUid = uid;
+    note(t2, `${finalName} is now the host`);
+  }
   note(t2, `${finalName} sits at seat ${seat + 1}, buys in ${n(stack)}${cash(t2)} (buy-in ${t2.records[uid].buyIns})`);
   prune(t2);
   touch(t2);
 }
 function prune(t2) {
   const gone = Object.values(t2.records).filter((r2) => r2.seat === null);
-  if (Object.keys(t2.records).length <= 200) return;
-  for (const r2 of gone.slice(0, Object.keys(t2.records).length - 200)) delete t2.records[r2.uid];
+  void gone;
 }
 function touch(t2) {
   t2.version++;
@@ -194436,7 +194439,7 @@ function cashOutAndFree(t2, seat) {
   note(t2, `${s2.name} leaves with ${n(s2.stack)} chips${perChip > 0 ? ` ($${(s2.stack * perChip / 100).toFixed(2)})` : ""}`);
   t2.seats[seat] = null;
   if (s2.uid === t2.ownerUid) {
-    const next = t2.seats.find((x2) => x2 && !x2.leaving) ?? t2.seats.find(Boolean);
+    const next = t2.seats.find((x2) => x2 && !x2.leaving && x2.status === "active") ?? t2.seats.find((x2) => x2 && !x2.leaving) ?? t2.seats.find(Boolean);
     if (next) {
       t2.ownerUid = next.uid;
       note(t2, `${next.name} is now the host`);
@@ -194456,9 +194459,10 @@ function leave(t2, uid, now) {
       return;
     }
     if (!hp.folded) {
+      const boardBefore = t2.hand.board.length;
       t2.hand = foldOut(t2.hand, hi);
       s2.stack = t2.hand.players[hi].stack;
-      afterHandChange(t2, now);
+      afterHandChange(t2, now, false, boardBefore);
     }
   }
   cashOutAndFree(t2, seat);
@@ -194505,8 +194509,9 @@ function setSitOut(t2, uid, out, now) {
     s2.status = "sitOut";
     const hi = handIdx(t2, uid);
     if (t2.phase === "betting" && t2.hand && hi >= 0 && !t2.hand.players[hi].folded && !t2.hand.players[hi].allIn) {
+      const boardBefore = t2.hand.board.length;
       t2.hand = foldOut(t2.hand, hi);
-      afterHandChange(t2, now);
+      afterHandChange(t2, now, false, boardBefore);
     }
   } else {
     s2.status = "active";
@@ -194529,7 +194534,7 @@ function setPaused(t2, uid, on, now) {
     if (t2.nextHandAt !== null) t2.nextHandAt += d;
     for (const s2 of t2.seats) {
       if (!s2) continue;
-      s2.lastSeen += d;
+      s2.lastSeen = Math.max(s2.lastSeen + d, now);
       if (s2.idleSince !== null) s2.idleSince += d;
     }
     t2.paused = false;
@@ -194541,7 +194546,10 @@ function setPaused(t2, uid, on, now) {
 function setSettings(t2, uid, s2) {
   if (uid !== t2.ownerUid) fail("Only the table owner can change settings");
   validateSettings(s2);
-  t2.pendingSettings = s2;
+  if (t2.phase !== "betting") {
+    t2.settings = s2;
+    t2.pendingSettings = null;
+  } else t2.pendingSettings = s2;
   note(t2, `Host sets blinds ${n(s2.smallBlind)}/${n(s2.bigBlind)}, ${n(s2.startStack)} chips per buy-in${s2.buyInCents ? ` at $${(s2.buyInCents / 100).toFixed(2)}` : ""} (from next hand)`);
   touch(t2);
 }
@@ -194699,7 +194707,9 @@ function tick(t2, now, deckFn) {
     }
     if (s2.status === "busted" && s2.idleSince !== null && now - s2.idleSince > BUSTED_MAX_MS && !contesting(t2, s2.uid)) leave(t2, s2.uid, now);
   }
-  if (t2.phase === "betting" && t2.hand && t2.deadline !== null && now > t2.deadline + GRACE_MS) {
+  const actorSeat = t2.phase === "betting" && t2.hand && t2.hand.toAct >= 0 ? t2.seats[seatOf(t2, t2.hand.players[t2.hand.toAct].uid)] : null;
+  const afkActor = !!actorSeat && actorSeat.status === "sitOut";
+  if (t2.phase === "betting" && t2.hand && t2.deadline !== null && (afkActor || now > t2.deadline + GRACE_MS)) {
     const h2 = t2.hand;
     const idx = h2.toAct;
     if (idx >= 0) {
@@ -194708,7 +194718,7 @@ function tick(t2, now, deckFn) {
       if (next !== h2) {
         t2.hand = next;
         const s2 = t2.seats[seatOf(t2, h2.players[idx].uid)];
-        if (s2) {
+        if (s2 && !afkActor) {
           s2.timeouts++;
           if (s2.status === "active") {
             s2.status = "sitOut";
@@ -194717,7 +194727,7 @@ function tick(t2, now, deckFn) {
             note(t2, `${s2.name} goes AFK (timed out)`);
           }
         }
-        afterHandChange(t2, now, true);
+        afterHandChange(t2, now, true, h2.board.length);
       }
     }
   }
@@ -194778,7 +194788,8 @@ function publicView(t2, now) {
   const leaderboard = Object.values(t2.records).map((r2) => {
     const s2 = r2.seat !== null ? t2.seats[r2.seat] : null;
     const hi = s2 && h2 && t2.phase === "betting" ? handIdx(t2, s2.uid) : -1;
-    const stack = (s2?.stack ?? 0) + (hi >= 0 ? h2.players[hi].total : 0);
+    const hiAny = h2 && t2.phase === "betting" ? handIdx(t2, r2.uid) : -1;
+    const stack = (s2?.stack ?? 0) + (s2 ? hi >= 0 ? h2.players[hi].total : 0 : hiAny >= 0 ? h2.players[hiAny].total : 0);
     const paid = r2.paidCents ?? 0;
     const perChip = pool;
     return { uid: r2.uid, name: r2.name, buyIns: r2.buyIns, invested: r2.invested, cashedOut: r2.cashedOut, cashedOutCents: Math.round(r2.cashedOut * perChip), stack, net: stack + r2.cashedOut - r2.invested, paidCents: paid, netCents: Math.round((stack + r2.cashedOut) * perChip) - paid, handsWon: r2.handsWon, biggestPot: r2.biggestPot, seated: !!s2 };
@@ -194819,7 +194830,7 @@ function publicView(t2, now) {
     } : null,
     eligible: eligibleSeats(t2).length,
     leaderboard,
-    log: h2 ? h2.log.slice(-15) : [],
+    log: h2 ? h2.log.slice(-120) : [],
     now,
     version: t2.version
   };
@@ -194888,7 +194899,7 @@ var firestoreStore = {
   },
   async ledger(code, since) {
     const db = getFirestore(app());
-    const snap = await db.collection(`tables/${code}/ledger`).orderBy("at").get();
+    const snap = await db.collection(`tables/${code}/ledger`).orderBy(FieldPath.documentId()).get();
     const out = [];
     const stale = [];
     snap.forEach((d) => {
@@ -195046,6 +195057,7 @@ async function handle(uid, req, deps) {
           setPaused(t2, uid, !!req.on, now);
           break;
         case "act": {
+          if (t2.paused) throw new TableError("The game is paused");
           const kind = String(req.kind);
           if (!["fold", "check", "call", "raise", "allin"].includes(kind)) throw new TableError("Bad action");
           const applied = act(t2, uid, {

@@ -158,7 +158,7 @@ export function migrate(t: Table): Table {
   for (const s of t.seats) {
     if (!s) continue
     s.afkHands ??= 0
-    s.idleSince ??= null
+    s.idleSince ??= s.status === 'sitOut' ? s.lastSeen : null
     s.timeouts ??= 0
     s.leaving ??= false
   }
@@ -205,6 +205,8 @@ export function sit(t: Table, uid: string, rawName: unknown, wanted: number | un
     paidCents: (rec?.paidCents ?? 0) + (t.settings.buyInCents ?? 0), cashedOut: rec?.cashedOut ?? 0, handsWon: rec?.handsWon ?? 0, biggestPot: rec?.biggestPot ?? 0, seat: seat as number,
   }
   t.seats[seat as number] = { uid, name: finalName, stack, status: 'active', timeouts: 0, leaving: false, lastSeen: now, afkHands: 0, idleSince: null }
+  // A table whose host has gone gets a new host from the next person to sit down.
+  if (!t.seats.some((x) => x?.uid === t.ownerUid)) { t.ownerUid = uid; note(t, `${finalName} is now the host`) }
   note(t, `${finalName} sits at seat ${(seat as number) + 1}, buys in ${n(stack)}${cash(t)} (buy-in ${t.records[uid].buyIns})`)
   prune(t)
   touch(t)
@@ -213,9 +215,8 @@ export function sit(t: Table, uid: string, rawName: unknown, wanted: number | un
 /** Keep the records map bounded: drop the oldest players who are gone. */
 function prune(t: Table) {
   const gone = Object.values(t.records).filter((r) => r.seat === null)
-  // Records hold the money owed, so they are kept generously.
-  if (Object.keys(t.records).length <= 200) return
-  for (const r of gone.slice(0, Object.keys(t.records).length - 200)) delete t.records[r.uid]
+  // Records hold the money owed, so they are never deleted.
+  void gone
 }
 
 function touch(t: Table) { t.version++ }
@@ -243,7 +244,7 @@ function cashOutAndFree(t: Table, seat: number) {
   t.seats[seat] = null
   // The table never ends up without an owner while someone is still sitting at it.
   if (s.uid === t.ownerUid) {
-    const next = t.seats.find((x) => x && !x.leaving) ?? t.seats.find(Boolean)
+    const next = t.seats.find((x) => x && !x.leaving && x.status === 'active') ?? t.seats.find((x) => x && !x.leaving) ?? t.seats.find(Boolean)
     if (next) { t.ownerUid = next.uid; note(t, `${next.name} is now the host`) }
   }
 }
@@ -262,10 +263,11 @@ export function leave(t: Table, uid: string, now: number): void {
       return
     }
     if (!hp.folded) {
+      const boardBefore = t.hand.board.length
       t.hand = foldOut(t.hand, hi)
       // The hand's stack for this player is what is left behind them.
       s.stack = t.hand.players[hi].stack
-      afterHandChange(t, now)
+      afterHandChange(t, now, false, boardBefore)
     }
   }
   cashOutAndFree(t, seat)
@@ -314,8 +316,9 @@ export function setSitOut(t: Table, uid: string, out: boolean, now: number): voi
     // Sitting out mid-hand folds you unless you are all-in.
     const hi = handIdx(t, uid)
     if (t.phase === 'betting' && t.hand && hi >= 0 && !t.hand.players[hi].folded && !t.hand.players[hi].allIn) {
+      const boardBefore = t.hand.board.length
       t.hand = foldOut(t.hand, hi)
-      afterHandChange(t, now)
+      afterHandChange(t, now, false, boardBefore)
     }
   } else {
     s.status = 'active'
@@ -339,7 +342,7 @@ export function setPaused(t: Table, uid: string, on: boolean, now: number): void
     if (t.nextHandAt !== null) t.nextHandAt += d
     for (const s of t.seats) {
       if (!s) continue
-      s.lastSeen += d
+      s.lastSeen = Math.max(s.lastSeen + d, now)
       if (s.idleSince !== null) s.idleSince += d
     }
     t.paused = false
@@ -351,7 +354,8 @@ export function setPaused(t: Table, uid: string, on: boolean, now: number): void
 export function setSettings(t: Table, uid: string, s: TableSettings): void {
   if (uid !== t.ownerUid) fail('Only the table owner can change settings')
   validateSettings(s)
-  t.pendingSettings = s
+  // Nothing is being dealt: apply now, so new buy-ins use the new price straight away.
+  if (t.phase !== 'betting') { t.settings = s; t.pendingSettings = null } else t.pendingSettings = s
   note(t, `Host sets blinds ${n(s.smallBlind)}/${n(s.bigBlind)}, ${n(s.startStack)} chips per buy-in${s.buyInCents ? ` at $${(s.buyInCents / 100).toFixed(2)}` : ''} (from next hand)`)
   touch(t)
 }
@@ -524,7 +528,10 @@ export function tick(t: Table, now: number, deckFn: () => Card[]): boolean {
     if (s.status === 'busted' && s.idleSince !== null && now - s.idleSince > BUSTED_MAX_MS && !contesting(t, s.uid)) leave(t, s.uid, now)
   }
   // 2. turn timeout
-  if (t.phase === 'betting' && t.hand && t.deadline !== null && now > t.deadline + GRACE_MS) {
+  // An AFK player still in the hand (after a timeout) checks or folds at once instead of using a full turn clock each time.
+  const actorSeat = t.phase === 'betting' && t.hand && t.hand.toAct >= 0 ? t.seats[seatOf(t, t.hand.players[t.hand.toAct].uid)] : null
+  const afkActor = !!actorSeat && actorSeat.status === 'sitOut'
+  if (t.phase === 'betting' && t.hand && t.deadline !== null && (afkActor || now > t.deadline + GRACE_MS)) {
     const h = t.hand
     const idx = h.toAct
     if (idx >= 0) {
@@ -533,11 +540,11 @@ export function tick(t: Table, now: number, deckFn: () => Card[]): boolean {
       if (next !== h) {
         t.hand = next
         const s = t.seats[seatOf(t, h.players[idx].uid)]
-        if (s) {
+        if (s && !afkActor) {
           s.timeouts++
           if (s.status === 'active') { s.status = 'sitOut'; s.idleSince = now; s.afkHands = 0; note(t, `${s.name} goes AFK (timed out)`) }
         }
-        afterHandChange(t, now, true)
+        afterHandChange(t, now, true, h.board.length)
       }
     }
   }
@@ -644,7 +651,9 @@ export function publicView(t: Table, now: number): PublicTable {
     const s = r.seat !== null ? t.seats[r.seat] : null
     const hi = s && h && t.phase === 'betting' ? handIdx(t, s.uid) : -1
     // chips already pushed into the pot this hand are still the player's
-    const stack = (s?.stack ?? 0) + (hi >= 0 ? h!.players[hi].total : 0)
+    // A player who left mid-hand still owns their chips in the pot until the hand ends.
+    const hiAny = h && t.phase === 'betting' ? handIdx(t, r.uid) : -1
+    const stack = (s?.stack ?? 0) + (s ? (hi >= 0 ? h!.players[hi].total : 0) : (hiAny >= 0 ? h!.players[hiAny].total : 0))
     const paid = r.paidCents ?? 0
     const perChip = pool
     return { uid: r.uid, name: r.name, buyIns: r.buyIns, invested: r.invested, cashedOut: r.cashedOut, cashedOutCents: Math.round(r.cashedOut * perChip), stack, net: stack + r.cashedOut - r.invested, paidCents: paid, netCents: Math.round((stack + r.cashedOut) * perChip) - paid, handsWon: r.handsWon, biggestPot: r.biggestPot, seated: !!s }
@@ -667,7 +676,7 @@ export function publicView(t: Table, now: number): PublicTable {
       refund: res.refund ? { seat: h.players[res.refund.id].seat, amount: res.refund.amount } : null,
     } : null,
     eligible: eligibleSeats(t).length,
-    leaderboard, log: h ? h.log.slice(-15) : [], now, version: t.version,
+    leaderboard, log: h ? h.log.slice(-120) : [], now, version: t.version,
   }
 }
 

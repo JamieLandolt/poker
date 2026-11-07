@@ -3,7 +3,7 @@ import { newDeck, shuffle, type Card, type Rng } from './cards.ts'
 import { legalActions } from './game.ts'
 import {
   act, chipCheck, createTable, migrate, setPaused, DEFAULT_TABLE_SETTINGS, holeCards, kick, leave, publicView, rebuy, seatOf,
-  setSitOut, showHand, sit, tick, TableError, type Table, AWAY_LEAVE_MS, AFK_KICK_MS, GRACE_MS,
+  setSettings, setSitOut, showHand, sit, tick, TableError, type Table, AWAY_LEAVE_MS, AFK_KICK_MS, GRACE_MS,
 } from './table.ts'
 
 function seeded(seed: number): Rng {
@@ -514,5 +514,47 @@ describe('showing on a fold', () => {
     showHand(t, a)
     expect(publicView(t, now).seats.find((x) => x?.uid === a)!.cards).toHaveLength(2)
     expect(publicView(t, now).seats.find((x) => x?.uid === other)!.cards).toBeNull()
+  })
+})
+
+describe('review fixes', () => {
+  it('an AFK player still in the hand acts at once instead of using a full turn clock', () => {
+    const { t, now, d } = setup(3)
+    const first = actor(t)
+    tick(t, t.deadline! + GRACE_MS + 1, d) // times out: checks or folds and goes AFK
+    expect(t.seats[seatOf(t, first)]!.status).toBe('sitOut')
+    // play on until it is the AFK player's turn again (if still in the hand), then one tick acts for them
+    let clock = now + 100_000
+    for (let i = 0; i < 20 && t.phase === 'betting'; i++) {
+      for (const x of t.seats) if (x) x.lastSeen = clock
+      if (actor(t) === first) { const seq = t.hand!.seq; tick(t, clock, d); expect(t.hand!.seq).toBeGreaterThan(seq); break }
+      act(t, actor(t), { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'call' }, clock)
+      clock += 10
+    }
+    check(t)
+  })
+  it('the next person to sit at a table whose host left becomes the host', () => {
+    const t = createTable('ABCDE', 'h', S, 0)
+    sit(t, 'h', 'Host', undefined, 0)
+    leave(t, 'h', 1)
+    sit(t, 'x', 'X', undefined, 2)
+    expect(t.ownerUid).toBe('x')
+    sit(t, 'y', 'Y', undefined, 3)
+    expect(t.ownerUid).toBe('x')
+  })
+  it('price changes apply at once when no hand is running', () => {
+    const t = createTable('ABCDE', 'u0', S, 0)
+    setSettings(t, 'u0', { ...S, buyInCents: 900 })
+    sit(t, 'u0', 'A', undefined, 1)
+    expect(t.records.u0.paidCents).toBe(900)
+  })
+  it('money adds to zero during a hand after someone leaves mid-hand', () => {
+    const { t, now } = setup(3)
+    const a = actor(t)
+    act(t, a, { handId: t.hand!.handId, seq: t.hand!.seq, kind: 'raise', raiseTo: 500 }, now)
+    leave(t, a, now)
+    expect(t.phase).toBe('betting')
+    const rows = publicView(t, now).leaderboard
+    expect(rows.reduce((x, r) => x + r.net, 0)).toBe(0)
   })
 })

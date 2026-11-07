@@ -156,7 +156,8 @@ function TableScreen({ code, uid }: { code: string; uid: string }) {
   const watching = useRef(false)
   useEffect(() => {
     if (!pub) return
-    if (mySeat >= 0) { wasSeated.current = true; watching.current = false }
+    // An all-in player who chose to watch keeps the seat until the hand ends; that must not cancel the choice.
+    if (mySeat >= 0) { wasSeated.current = true; if (!pub.seats[mySeat]?.leaving) watching.current = false }
     else if (wasSeated.current && !watching.current) location.hash = ''
   }, [pub, mySeat])
   const toggleLog = () => setLogOpen((v) => { lsSet(LOG_KEY, v ? '0' : '1'); return !v })
@@ -317,7 +318,8 @@ function HistoryCard({ code, onClose, startOn = 'log' }: { code: string; onClose
     return () => { live = false }
   }, [code, startOn])
   const stamp = (at: number) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-  const paid = (data?.settings.buyInCents ?? 0) > 0
+  // Money mode follows what was actually paid, not the current price.
+  const paid = !!data?.leaderboard.some((r) => r.paidCents > 0)
   const text = data ? [
     `Table ${code}`,
     ...data.leaderboard.map((r) => `${r.name}: ${r.buyIns} buy-in${r.buyIns === 1 ? '' : 's'}, ${r.seated ? `${r.stack} chips on table` : `left with ${r.cashedOut}${paid ? ` (${money(r.cashedOutCents)})` : ''}`}, net ${r.net}${paid ? `, ${money(r.netCents, true) || '$0'}` : ''}`),

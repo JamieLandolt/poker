@@ -1,6 +1,6 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
-import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { holeCards, publicView, type Table } from '../src/engine/table.ts'
 import type { Store } from './handler.ts'
 
@@ -63,7 +63,7 @@ export const firestoreStore: Store = {
   },
   async ledger(code, since) {
     const db = getFirestore(app())
-    const snap = await db.collection(`tables/${code}/ledger`).orderBy('at').get()
+    const snap = await db.collection(`tables/${code}/ledger`).orderBy(FieldPath.documentId()).get()
     const out: { at: number; lines: string[] }[] = []
     const stale: FirebaseFirestore.DocumentReference[] = []
     snap.forEach((d) => {

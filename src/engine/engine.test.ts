@@ -81,8 +81,8 @@ describe('pots', () => {
       { id: 1, total: 20, folded: true },
       { id: 2, total: 0, folded: false },
     ])
-    expect(r.refund).toEqual({ id: 1, amount: 10 })
-    expect(r.pots).toEqual([{ amount: 20, eligible: [2] }])
+    expect(r.refund).toBeNull() // a folded player forfeits even the unmatched part
+    expect(r.pots).toEqual([{ amount: 30, eligible: [2] }])
   })
   it('refunds an uncalled bet', () => {
     const r = buildPots([{ id: 0, total: 100, folded: false }, { id: 1, total: 40, folded: false }])
@@ -223,7 +223,7 @@ describe('game', () => {
       let s = deal([1000, 1000])
       s = foldOut(s, 1)
       expect(s.phase).toBe('handOver')
-      expect(s.result!.payouts[0]).toBe(20) // pays 10, big blind refunded 10
+      expect(s.result!.payouts[0]).toBe(30) // the leaving big blind forfeits the whole blind
     })
     it('completes the round when the remaining players already matched', () => {
       let s = deal([1000, 1000, 1000], 0) // actor 0
