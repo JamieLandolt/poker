@@ -119,7 +119,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
   // ----- geometry -----
   const small = w < 560
   const cx = w / 2, cy = h / 2
-  const rx = Math.min(w * 0.42, (w - (small ? 96 : 128)) / 2 - 4), ry = h * (small ? 0.37 : 0.37)
+  const rx = Math.min(w * 0.44, (w - (small ? 96 : 128)) / 2 - 4), ry = h * (small ? 0.38 : 0.4)
   // Seats have fixed places around the table, so you sit exactly where you clicked "Sit".
   const pos = (seat: number) => {
     const th = (Math.PI / 180) * (90 + seat * (360 / MAX_SEATS))
@@ -224,7 +224,7 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0">
-      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full mx-auto flex-1 min-h-0 select-none mt-14" style={{ maxWidth: Math.max(h, 320) * 1.55 }}>
+      <div ref={ref} data-table={tableTheme} data-deck={deckStyle} data-faces={fourColour ? 'four' : 'classic'} className="relative w-full mx-auto flex-1 min-h-0 select-none mt-11" style={{ maxWidth: Math.max(h, 320) * 1.75 }}>
         <div className="rail" />
         <div className="felt" />
 
@@ -246,13 +246,14 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
 
         {/* result banner */}
         {!holding && pub.phase === 'handOver' && pub.result && (
-          <div className="absolute glass px-3 py-1.5 text-center text-xs" style={{ left: cx, top: potSpot.y - 46, transform: 'translate(-50%, -50%)', maxWidth: '70%' }}>
-            {pub.result.pots.map((p, i) => (
+          <div className="absolute glass px-3 py-1.5 text-center text-xs" style={{ left: cx, top: boardY + boardCw * 0.7 + 12, transform: 'translate(-50%, 0)', maxWidth: '70%', zIndex: 6 }}>
+            {pub.result.pots.slice(0, 3).map((p, i) => (
               <div key={i}>
                 <b className="text-amber-200">{p.winners.map((s) => pub.seats[s]?.name ?? 'Player').join(' & ')}</b> won {p.amount.toLocaleString()}
                 {pub.result!.showdown && p.winners[0] !== undefined && pub.result!.hands[p.winners[0]] ? ` · ${pub.result!.hands[p.winners[0]]}` : ''}
               </div>
             ))}
+            {pub.result.pots.length > 3 && <div className="text-white/60">+{pub.result.pots.length - 3} more</div>}
           </div>
         )}
         {pub.paused && (
@@ -284,8 +285,11 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
           const revealed = !isMe && !!s.cards
           const cardW = isMe ? heroCw : revealed ? Math.round(cw * 1.3) : cw
           // Bottom-half seats have their cards between the plate and the table centre; keep the bet clear of them.
-          const betFrac = crowd ? 0.34 : 0.5
-          const betSpot = { x: p.x + (cx - p.x) * betFrac, y: p.y + (cy - p.y) * betFrac - (p.y > cy ? cardW * 1.5 : 0) }
+          // Bets sit a fixed distance from the plate on the side facing the table centre, so they never reach the board or deck.
+          const toC = Math.hypot(cx - p.x, cy - p.y) || 1
+          const ux = (cx - p.x) / toC, uy = (cy - p.y) / toC
+          const reach = Math.abs(ux) * (sw * 0.5 + 34) + Math.abs(uy) * 62
+          const betSpot = { x: p.x + ux * reach, y: p.y + uy * reach - (p.y > cy ? cardW * 1.2 : 0) }
           const fly = (c: number) => {
             if (!animating || dealIdx < 0) return null
             const delay = (c * nDeal + dealIdx) * DEAL_STEP
@@ -350,9 +354,10 @@ export default function TableView({ code, uid, live, mySeat, onPickSeat, tableTh
                 </div>
               ))}
               {winners.has(s.seat) && pub.phase === 'handOver' && (
-                <div className="absolute" style={{ left: p.x + (p.x < cx - 4 || Math.abs(p.x - cx) <= 4 ? 1 : -1) * (sw * 0.5 + 44), top: p.y, transform: 'translate(-50%, -50%)', zIndex: 5 }} key={`win-${pub.handId}-${s.seat}`}>
-                  <Chips amount={won(s.seat)} bigBlind={pub.settings.bigBlind} fly={{ dx: cx - p.x - (p.x < cx - 4 || Math.abs(p.x - cx) <= 4 ? 1 : -1) * (sw * 0.5 + 44), dy: cy - p.y, delay: 200 }} />
-                  <div className="float-win num text-emerald-300 font-extrabold text-lg text-center">+{won(s.seat).toLocaleString()}</div>
+                <div className="absolute" style={{ left: p.x, top: p.y, transform: 'translate(-50%, -50%)', zIndex: 5, pointerEvents: 'none' }} key={`win-${pub.handId}-${s.seat}`}>
+                  <div className="chip-win" style={{ ['--dx' as string]: `${cx - p.x}px`, ['--dy' as string]: `${cy - p.y}px` }}>
+                    <Chips amount={won(s.seat)} bigBlind={pub.settings.bigBlind} />
+                  </div>
                 </div>
               )}
             </div>
